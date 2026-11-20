@@ -5,72 +5,46 @@ import com.lambdashield.fraude.domain.enums.EstadoCuenta;
 import com.lambdashield.fraude.domain.enums.NaturalezaTransaccion;
 import com.lambdashield.fraude.repository.CuentaRepository;
 import com.lambdashield.fraude.repository.TransaccionRepository;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.EnumMap;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-
-/**
- * Caso de uso para el resumen financiero mostrado en el dashboard.
- * Todas las cifras provienen de PostgreSQL: saldo de las cuentas activas e
- * ingresos/egresos según la naturaleza de cada transacción del periodo.
- */
 @Service
 public class DashboardResumenService {
-
-    private final TransaccionRepository transaccionRepository;
-    private final CuentaRepository cuentaRepository;
-
-    public DashboardResumenService(TransaccionRepository transaccionRepository,
-                                   CuentaRepository cuentaRepository) {
-        this.transaccionRepository = transaccionRepository;
-        this.cuentaRepository = cuentaRepository;
+    private final TransaccionRepository transacciones;
+    private final CuentaRepository cuentas;
+    public DashboardResumenService(TransaccionRepository transacciones, CuentaRepository cuentas) {
+        this.transacciones = transacciones;
+        this.cuentas = cuentas;
     }
-
     @Transactional(readOnly = true)
-    public ResumenFinanciero obtenerResumen() {
-        return obtenerResumen(365);
-    }
+    public ResumenFinanciero obtenerResumen() { return obtenerResumen(365); }
 
     @Transactional(readOnly = true)
     public ResumenFinanciero obtenerResumen(int dias) {
-        LocalDate hoy = LocalDate.now();
-        OffsetDateTime desde = hoy.minusDays(dias).atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime();
-        OffsetDateTime hasta = hoy.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime();
-        OffsetDateTime desdePeriodoAnterior = desde.minusDays(dias + 1L);
-
-        double ingresos = aDouble(transaccionRepository.sumarMonto(desde, hasta, NaturalezaTransaccion.CREDITO));
-        double egresos = aDouble(transaccionRepository.sumarMonto(desde, hasta, NaturalezaTransaccion.DEBITO));
-        double ingresosAnteriores = aDouble(
-                transaccionRepository.sumarMonto(desdePeriodoAnterior, desde, NaturalezaTransaccion.CREDITO));
-        double egresosAnteriores = aDouble(
-                transaccionRepository.sumarMonto(desdePeriodoAnterior, desde, NaturalezaTransaccion.DEBITO));
-
-        double saldo = aDouble(cuentaRepository.sumarSaldoPorEstado(EstadoCuenta.ACTIVA));
-        double saldoInicio = saldo - ingresos + egresos;
-
-        return new ResumenFinanciero(
-                saldo,
-                ingresos,
-                egresos,
-                variacionPorcentual(saldo, saldoInicio),
-                variacionPorcentual(ingresos, ingresosAnteriores),
-                variacionPorcentual(egresos, egresosAnteriores)
-        );
+        PeriodoConsulta periodo = PeriodoConsulta.ultimosDias(dias);
+        Map<NaturalezaTransaccion, BigDecimal> actual = totales(periodo);
+        Map<NaturalezaTransaccion, BigDecimal> anterior = totales(periodo.anterior());
+        BigDecimal ingresos = actual.getOrDefault(NaturalezaTransaccion.CREDITO, BigDecimal.ZERO);
+        BigDecimal egresos = actual.getOrDefault(NaturalezaTransaccion.DEBITO, BigDecimal.ZERO);
+        BigDecimal saldo = cuentas.sumarSaldoPorEstado(EstadoCuenta.ACTIVA);
+        return new ResumenFinanciero(saldo, ingresos, egresos,
+                variacionPorcentual(saldo, saldo.subtract(ingresos).add(egresos)),
+                variacionPorcentual(ingresos, anterior.getOrDefault(NaturalezaTransaccion.CREDITO, BigDecimal.ZERO)),
+                variacionPorcentual(egresos, anterior.getOrDefault(NaturalezaTransaccion.DEBITO, BigDecimal.ZERO)));
     }
-
-    /** Variación porcentual respecto al periodo anterior; 0 si no hay base de comparación. */
-    static double variacionPorcentual(double actual, double anterior) {
-        if (anterior == 0) {
-            return actual == 0 ? 0 : 100;
-        }
-        return Math.round(((actual - anterior) / Math.abs(anterior)) * 1000.0) / 10.0;
+    private Map<NaturalezaTransaccion, BigDecimal> totales(PeriodoConsulta periodo) {
+        Map<NaturalezaTransaccion, BigDecimal> resultado = new EnumMap<>(NaturalezaTransaccion.class);
+        transacciones.sumarMontosPorNaturaleza(periodo.desde(), periodo.hasta())
+                .forEach(total -> resultado.put(total.getNaturaleza(), total.getMonto()));
+        return resultado;
     }
-
-    private static double aDouble(BigDecimal valor) {
-        return valor != null ? valor.doubleValue() : 0.0;
+    static double variacionPorcentual(BigDecimal actual, BigDecimal anterior) {
+        if (anterior.signum() == 0) return actual.signum() == 0 ? 0 : 100;
+        return actual.subtract(anterior).multiply(BigDecimal.valueOf(100))
+                .divide(anterior.abs(), 1, RoundingMode.HALF_UP).doubleValue();
     }
 }

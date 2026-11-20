@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import com.lambdashield.fraude.repository.EvaluacionFraudeRepository;
 import com.lambdashield.fraude.presentation.dto.response.EvaluacionResponse;
 import org.junit.jupiter.api.Test;
@@ -49,6 +53,9 @@ class SeguridadApiMockMvcTest {
             """;
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
     @Autowired
@@ -59,22 +66,15 @@ class SeguridadApiMockMvcTest {
     }
 
     private MockHttpSession analista() {
-        return sesion("ANALISTA", null);
+        return SesionesPrueba.crear(authService, "ANALISTA");
     }
 
     private MockHttpSession admin() {
-        return sesion("ADMIN", null);
+        return SesionesPrueba.crear(authService, "ADMIN");
     }
 
-    private static MockHttpSession sesion(String rol, String codigoCliente) {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-" + rol.toLowerCase());
-        session.setAttribute("nombreUsuario", "Usuario " + rol);
-        session.setAttribute("rol", rol);
-        if (codigoCliente != null) {
-            session.setAttribute("codigoCliente", codigoCliente);
-        }
-        return session;
+    private MockHttpSession sesion(String rol, String codigoCliente) {
+        return SesionesPrueba.crear(authService, rol);
     }
 
     @Test
@@ -107,7 +107,7 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).session(analista()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(analista()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("No autorizado"));
     }
@@ -117,7 +117,7 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNoContent());
 
         assertThat(evaluacionFraudeRepository.findById(id))
@@ -130,9 +130,9 @@ class SeguridadApiMockMvcTest {
     @Test
     void deleteNoEstaPermitidoNiParaAdmin() throws Exception {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .delete("/api/v1/evaluation").session(admin()))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(jsonPath("$.errores[0]").value("Método no permitido; use PATCH para la baja lógica"));
+                        .delete("/api/v1/evaluation").with(SesionesPrueba.csrf()).session(admin()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("No autorizado"));
     }
 
     @Test
@@ -151,7 +151,7 @@ class SeguridadApiMockMvcTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalido))
@@ -165,7 +165,7 @@ class SeguridadApiMockMvcTest {
     void clienteInexistenteDevuelve404() throws Exception {
         String inexistente = JSON_VALIDO.replace("\"C-001\"", "\"C-999\"");
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(inexistente))
@@ -188,14 +188,15 @@ class SeguridadApiMockMvcTest {
     }
 
     @Test
-    void operacionSinCodigoClienteNoHaceFallbackATodasLasTransacciones() throws Exception {
+    void operacionRecuperaCodigoClienteDesdeIdentidadAutenticada() throws Exception {
         MockHttpSession clienteSinCodigo = sesion("CLIENTE", null);
+        clienteSinCodigo.removeAttribute("codigoCliente");
 
         MvcResult result = mockMvc.perform(get("/operacion").session(clienteSinCodigo))
                 .andExpect(status().isOk())
                 .andReturn();
 
-        assertThat(transaccionesDelModelo(result)).isEmpty();
+        assertThat(transaccionesDelModelo(result)).isNotEmpty().allMatch(t -> "C-001".equals(t.clienteCodigo()));
     }
 
     @Test
@@ -203,10 +204,10 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNoContent());
 
         var restaurada = evaluacionFraudeRepository.findById(id).orElseThrow();
@@ -219,20 +220,20 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).session(analista()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(analista()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("No autorizado"));
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).session(cliente()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(cliente()))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void reactivarEvaluacionInexistenteDevuelve404() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", 999999).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", 999999).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errores").isArray());
     }
@@ -242,7 +243,7 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value("La evaluación ya está activa: " + id));
     }
@@ -252,7 +253,7 @@ class SeguridadApiMockMvcTest {
         Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
                 .getFirst().getIdEvaluacion();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/v1/evaluation").session(admin()))

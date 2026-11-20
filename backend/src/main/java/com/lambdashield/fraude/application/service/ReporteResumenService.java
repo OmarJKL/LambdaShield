@@ -1,14 +1,12 @@
 package com.lambdashield.fraude.application.service;
 
 import com.lambdashield.fraude.application.model.EvaluacionResultado;
-import org.springframework.stereotype.Service;
-
+import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.stereotype.Service;
 
 @Service
 public class ReporteResumenService {
-
-    private final EvaluacionConsultaService evaluacionConsultaService;
 
     public record ResumenReporte(
             long total,
@@ -16,18 +14,10 @@ public class ReporteResumenService {
             long monitoreadas,
             long enRevision,
             long bloqueadas,
-            double montoTotal,
-            double montoBloqueado,
+            BigDecimal montoTotal,
+            BigDecimal montoBloqueado,
             double tasaBloqueo
     ) {}
-
-    public ReporteResumenService(EvaluacionConsultaService evaluacionConsultaService) {
-        this.evaluacionConsultaService = evaluacionConsultaService;
-    }
-
-    public ResumenReporte obtenerResumen() {
-        return resumir(evaluacionConsultaService.listarTodas());
-    }
 
     public ResumenReporte resumir(List<EvaluacionResultado> transacciones) {
         long total = transacciones.size();
@@ -36,10 +26,10 @@ public class ReporteResumenService {
         long enRevision = transacciones.stream().filter(t -> "alto".equals(t.nivel())).count();
         long bloqueadas = transacciones.stream().filter(t -> "critico".equals(t.nivel())).count();
 
-        double montoTotal = transacciones.stream().mapToDouble(EvaluacionResultado::monto).sum();
-        double montoBloqueado = transacciones.stream()
+        BigDecimal montoTotal = transacciones.stream().map(EvaluacionResultado::monto).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal montoBloqueado = transacciones.stream()
                 .filter(t -> "critico".equals(t.nivel()) || "alto".equals(t.nivel()))
-                .mapToDouble(EvaluacionResultado::monto).sum();
+                .map(EvaluacionResultado::monto).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         double tasaBloqueo = total > 0 ? ((double) bloqueadas / total) * 100.0 : 0.0;
 

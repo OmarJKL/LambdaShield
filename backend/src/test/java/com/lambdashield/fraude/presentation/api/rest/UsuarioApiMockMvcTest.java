@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,14 +42,13 @@ class UsuarioApiMockMvcTest {
             """;
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
-    private static MockHttpSession sesion(String rol) {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-" + rol.toLowerCase());
-        session.setAttribute("nombreUsuario", "Usuario " + rol);
-        session.setAttribute("rol", rol);
-        return session;
+    private MockHttpSession sesion(String rol) {
+        return SesionesPrueba.crear(authService, rol);
     }
 
     @Test
@@ -58,7 +61,7 @@ class UsuarioApiMockMvcTest {
 
     @Test
     void adminCreaUsuarioYapareceEnElListado() throws Exception {
-        mockMvc.perform(post("/api/v1/user")
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO))
@@ -73,7 +76,7 @@ class UsuarioApiMockMvcTest {
 
     @Test
     void usuarioDuplicadoDevuelve400() throws Exception {
-        mockMvc.perform(post("/api/v1/user")
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO.replace("nuevo.usuario", "admin")))
@@ -83,7 +86,7 @@ class UsuarioApiMockMvcTest {
 
     @Test
     void actualizaUsuarioYCambiaSuClave() throws Exception {
-        String creado = mockMvc.perform(post("/api/v1/user")
+        String creado = mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO))
@@ -91,7 +94,7 @@ class UsuarioApiMockMvcTest {
                 .andReturn().getResponse().getContentAsString();
         long id = extraerId(creado);
 
-        mockMvc.perform(patch("/api/v1/user/{id}", id)
+        mockMvc.perform(patch("/api/v1/user/{id}", id).with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -107,7 +110,7 @@ class UsuarioApiMockMvcTest {
                 .andExpect(jsonPath("$.nombres").value("Usuario Editado"))
                 .andExpect(jsonPath("$.estado").value("BLOQUEADO"));
 
-        mockMvc.perform(patch("/api/v1/user/{id}/clave", id)
+        mockMvc.perform(patch("/api/v1/user/{id}/clave", id).with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"clave\": \"otraClave123\"}"))
@@ -116,7 +119,7 @@ class UsuarioApiMockMvcTest {
 
     @Test
     void adminEliminaUsuarioCreado() throws Exception {
-        String creado = mockMvc.perform(post("/api/v1/user")
+        String creado = mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO))
@@ -124,7 +127,7 @@ class UsuarioApiMockMvcTest {
                 .andReturn().getResponse().getContentAsString();
         long id = extraerId(creado);
 
-        mockMvc.perform(delete("/api/v1/user/{id}", id).session(sesion("ADMIN")))
+        mockMvc.perform(delete("/api/v1/user/{id}", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/v1/user/{id}", id).session(sesion("ADMIN")))
@@ -132,10 +135,10 @@ class UsuarioApiMockMvcTest {
     }
 
     @Test
-    void noPuedeEliminarAlUltimoAdministrador() throws Exception {
-        mockMvc.perform(delete("/api/v1/user/1").session(sesion("ADMIN")))
+    void noPuedeEliminarSuPropioUsuario() throws Exception {
+        mockMvc.perform(delete("/api/v1/user/1").with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errores[0]").value("No se puede eliminar al último administrador activo"));
+                .andExpect(jsonPath("$.errores[0]").value("No puedes eliminar tu propio usuario"));
     }
 
     @Test
@@ -143,26 +146,26 @@ class UsuarioApiMockMvcTest {
         for (MockHttpSession sesion : new MockHttpSession[]{sesion("ANALISTA"), sesion("CLIENTE")}) {
             mockMvc.perform(get("/api/v1/user").session(sesion))
                     .andExpect(status().isForbidden());
-            mockMvc.perform(post("/api/v1/user")
+            mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                             .session(sesion)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(JSON_NUEVO))
                     .andExpect(status().isForbidden());
-            mockMvc.perform(delete("/api/v1/user/1").session(sesion))
+            mockMvc.perform(delete("/api/v1/user/1").with(SesionesPrueba.csrf()).session(sesion))
                     .andExpect(status().isForbidden());
         }
     }
 
     @Test
     void validacionDeEntradaRechazaClaveCortaYRolInvalido() throws Exception {
-        mockMvc.perform(post("/api/v1/user")
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO.replace("claveSegura123", "corta")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores").isArray());
 
-        mockMvc.perform(post("/api/v1/user")
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_NUEVO.replace("ANALISTA", "SUPERVISOR")))

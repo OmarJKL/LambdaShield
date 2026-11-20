@@ -29,38 +29,71 @@
      *  - 403 → muestra un aviso al usuario y lanza el error
      */
     async function fetchApi(url, opciones = {}) {
-        const res = await fetch(url, opciones);
+        const metodo = (opciones.method || 'GET').toUpperCase();
+        const destino = new URL(url, window.location.href);
+        if (destino.origin !== window.location.origin) throw new Error('La API solo admite el mismo origen.');
+        const headers = new Headers(opciones.headers);
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(metodo)) {
+            const token = document.querySelector('meta[name="_csrf"]')?.content;
+            const cabecera = document.querySelector('meta[name="_csrf_header"]')?.content;
+            if (!token || !cabecera) throw new Error('Recarga la página para renovar la protección de sesión.');
+            headers.set(cabecera, token);
+        }
+        const res = await fetch(destino.href, { ...opciones, headers, credentials: 'same-origin' });
 
         if (res.status === 401) {
             window.location.replace('/login');
-            throw new Error('Sesión expirada');
+            throw Object.assign(new Error('Sesión expirada'), { gestionado: true });
         }
 
         if (res.status === 403) {
-            let mensaje = 'No tienes permisos para realizar esta acción.';
-            try {
-                const data = await res.clone().json();
-                if (data && data.error) {
-                    mensaje = data.error;
-                }
-            } catch (e) {
-                // Respuesta sin cuerpo JSON: se conserva el mensaje genérico.
-            }
+            const mensaje = await mensajeError(res, 'No tienes permisos para realizar esta acción.');
             mostrarAviso(mensaje);
-            throw new Error(mensaje);
+            throw Object.assign(new Error(mensaje), { gestionado: true });
         }
 
         return res;
     }
 
-    window.LSApi = { fetch: fetchApi, mostrarAviso };
+    async function mensajeError(res, defecto = 'No se pudo completar la operación.') {
+        try {
+            const datos = await res.clone().json();
+            return datos.errores?.[0] || datos.error || defecto;
+        } catch { return defecto; }
+    }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        const btnLogout = document.getElementById('btnCerrarSesion');
-        if (btnLogout) {
-            btnLogout.addEventListener('click', () => {
-                window.location.href = '/logout';
-            });
+    async function validar(res) {
+        if (!res.ok) throw new Error(await mensajeError(res));
+        return res;
+    }
+
+    async function json(url, opciones) {
+        const res = await validar(await fetchApi(url, opciones));
+        return res.status === 204 ? null : res.json();
+    }
+
+    function reportarError(error) {
+        if (!error.gestionado) mostrarAviso(error.message || 'No se pudo conectar con el servidor.');
+    }
+
+    function escucharAccion(elemento, evento, accion) {
+        elemento.addEventListener(evento, async e => {
+            try { await accion(e); } catch (error) { reportarError(error); }
+        });
+    }
+
+    window.LSApi = { fetch: fetchApi, json, validar, mensajeError, mostrarAviso, reportarError, escucharAccion };
+
+    const etiquetas = { bajo: 'Bajo', medio: 'Medio', alto: 'Alto', critico: 'Crítico' };
+    window.LSUi = {
+        nivel: nivel => etiquetas[nivel] || 'Desconocido',
+        claseNivel: nivel => Object.hasOwn(etiquetas, nivel) ? 'riesgo-' + nivel : '',
+        moneda: valor => Number(valor).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        escapeHtml(texto) {
+            const span = document.createElement('span');
+            span.textContent = texto == null ? '' : String(texto);
+            return span.innerHTML;
         }
-    });
+    };
+
 })();

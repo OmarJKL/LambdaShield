@@ -4,9 +4,11 @@ import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import java.math.BigDecimal;
 
 public record TransaccionCrearRequest(
     @NotBlank(message = "El cliente es obligatorio")
@@ -14,10 +16,11 @@ public record TransaccionCrearRequest(
             message = "El código de cliente admite hasta 20 letras, números o guiones")
     String cliente,
 
+    @NotNull(message = "El monto es obligatorio")
     @Positive(message = "El monto debe ser mayor que cero")
     @Digits(integer = 16, fraction = 2,
             message = "El monto admite hasta 16 enteros y 2 decimales")
-    double monto,
+    BigDecimal monto,
 
     @Pattern(regexp = "[A-Za-z_]{0,40}",
             message = "La categoría solo admite letras y guion bajo (máximo 40 caracteres)")
@@ -53,5 +56,11 @@ public record TransaccionCrearRequest(
     String ip,
 
     @Size(max = 150, message = "El nombre del beneficiario admite hasta 150 caracteres")
-    String beneficiarioNombre
+    String beneficiarioNombre,
+
+    @Pattern(regexp = "^$|[0-9 -]{6,50}", message = "La cuenta destino admite entre 6 y 50 dígitos, espacios o guiones")
+    String numeroCuentaDestino,
+
+    @Pattern(regexp = "^$|lambda|bcp|bbva|interbank|scotiabank", message = "Banco de destino inválido")
+    String bancoDestino
 ) {}

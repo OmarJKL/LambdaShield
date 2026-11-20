@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,14 +26,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class DashboardApiMockMvcTest {
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
-    private static MockHttpSession analista() {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-analista");
-        session.setAttribute("nombreUsuario", "Usuario ANALISTA");
-        session.setAttribute("rol", "ANALISTA");
-        return session;
+    private MockHttpSession analista() {
+        return SesionesPrueba.crear(authService, "ANALISTA");
     }
 
     @Test

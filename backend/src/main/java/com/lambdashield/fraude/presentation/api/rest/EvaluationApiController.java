@@ -89,6 +89,6 @@ public class EvaluationApiController {
         return new EvaluarTransaccionCommand(
                 request.cliente(), request.monto(), request.categoria(), request.hora(), request.pais(),
                 request.dispositivo(), request.operacionesUltimaHora(), request.beneficiario(), request.ip(),
-                request.beneficiarioNombre());
+                request.beneficiarioNombre(), request.numeroCuentaDestino(), request.bancoDestino());
     }
 }

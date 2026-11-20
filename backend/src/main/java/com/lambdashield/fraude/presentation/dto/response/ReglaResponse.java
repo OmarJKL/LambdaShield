@@ -4,5 +4,6 @@ public record ReglaResponse(
     String codigo,
     String nombre,
     String descripcion,
-    int pesoMaximo
+    int pesoMaximo,
+    boolean activa
 ) {}

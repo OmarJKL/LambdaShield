@@ -1,5 +1,6 @@
 package com.lambdashield.fraude.application.model;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -8,7 +9,7 @@ public record EvaluacionResultado(
         String id,
         String clienteCodigo,
         String clienteNombre,
-        double monto,
+        BigDecimal monto,
         String categoria,
         String pais,
         int hora,
@@ -17,5 +18,6 @@ public record EvaluacionResultado(
         LocalDateTime fechaEvaluacion,
         List<FactorResultado> factores,
         Long idInterno,
-        boolean activa
+        boolean activa,
+    BigDecimal saldoDisponible
 ) {}

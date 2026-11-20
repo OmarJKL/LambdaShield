@@ -1,35 +1,31 @@
 package com.lambdashield.fraude.application.service;
 
+import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
+import com.lambdashield.fraude.application.mapper.EvaluacionResultadoMapper;
+import com.lambdashield.fraude.application.model.EvaluacionResultado;
+import com.lambdashield.fraude.application.model.FactorResultado;
 import com.lambdashield.fraude.domain.entity.Cliente;
 import com.lambdashield.fraude.domain.entity.Cuenta;
 import com.lambdashield.fraude.domain.entity.EvaluacionFraude;
 import com.lambdashield.fraude.domain.entity.EvaluacionRegla;
 import com.lambdashield.fraude.domain.entity.ReglaFraude;
 import com.lambdashield.fraude.domain.entity.Transaccion;
-import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
-import com.lambdashield.fraude.domain.enums.DecisionFraude;
 import com.lambdashield.fraude.domain.enums.EstadoTransaccion;
 import com.lambdashield.fraude.domain.enums.NivelRiesgo;
 import com.lambdashield.fraude.domain.fraud.FactorEvaluado;
-import com.lambdashield.fraude.domain.fraud.FactorRegla;
 import com.lambdashield.fraude.domain.fraud.TransaccionEvaluable;
-import com.lambdashield.fraude.application.mapper.EvaluacionResultadoMapper;
-import com.lambdashield.fraude.application.model.EvaluacionResultado;
-import com.lambdashield.fraude.application.model.FactorResultado;
 import com.lambdashield.fraude.repository.CuentaRepository;
 import com.lambdashield.fraude.repository.EvaluacionFraudeRepository;
 import com.lambdashield.fraude.repository.EvaluacionReglaRepository;
-import com.lambdashield.fraude.repository.ReglaFraudeRepository;
 import com.lambdashield.fraude.repository.TransaccionRepository;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Servicio principal de evaluaciones.
@@ -46,9 +42,11 @@ public class EvaluacionTransaccionService {
     private final TransaccionReferenciasResolver referenciasResolver;
     private final TransaccionRepository transaccionRepository;
     private final CuentaRepository cuentaRepository;
+    private final MovimientoSaldoService saldos;
+    private final NotificacionService notificaciones;
+    private final CatalogoReglasService catalogoReglas;
     private final EvaluacionFraudeRepository evaluacionFraudeRepository;
     private final EvaluacionReglaRepository evaluacionReglaRepository;
-    private final ReglaFraudeRepository reglaFraudeRepository;
     private final EvaluacionResultadoMapper resultadoMapper;
 
     public EvaluacionTransaccionService(DeteccionFraudeService deteccionFraudeService,
@@ -57,9 +55,11 @@ public class EvaluacionTransaccionService {
                               TransaccionReferenciasResolver referenciasResolver,
                               TransaccionRepository transaccionRepository,
                               CuentaRepository cuentaRepository,
+                              MovimientoSaldoService saldos,
+                              NotificacionService notificaciones,
+                              CatalogoReglasService catalogoReglas,
                               EvaluacionFraudeRepository evaluacionFraudeRepository,
                               EvaluacionReglaRepository evaluacionReglaRepository,
-                              ReglaFraudeRepository reglaFraudeRepository,
                               EvaluacionResultadoMapper resultadoMapper) {
         this.deteccionFraudeService = deteccionFraudeService;
         this.clienteService = clienteService;
@@ -67,16 +67,18 @@ public class EvaluacionTransaccionService {
         this.referenciasResolver = referenciasResolver;
         this.transaccionRepository = transaccionRepository;
         this.cuentaRepository = cuentaRepository;
+        this.saldos = saldos;
+        this.notificaciones = notificaciones;
+        this.catalogoReglas = catalogoReglas;
         this.evaluacionFraudeRepository = evaluacionFraudeRepository;
         this.evaluacionReglaRepository = evaluacionReglaRepository;
-        this.reglaFraudeRepository = reglaFraudeRepository;
         this.resultadoMapper = resultadoMapper;
     }
 
     @Transactional
     public EvaluacionResultado crearYEvaluar(EvaluarTransaccionCommand request) {
         Cliente cliente = obtenerCliente(request.cliente());
-        return crearYEvaluar(request, OffsetDateTime.now(), cliente, "127.0.0.1", null);
+        return crearYEvaluar(request, OffsetDateTime.now(), cliente, "127.0.0.1", null, false);
     }
 
     /**
@@ -110,14 +112,14 @@ public class EvaluacionTransaccionService {
                 (int) Math.min(Integer.MAX_VALUE, operacionesUltimaHora),
                 request.beneficiario(),
                 ip,
-                request.beneficiarioNombre()
+                request.beneficiarioNombre(), request.numeroCuentaDestino(), request.bancoDestino()
         );
 
-        return crearYEvaluar(derivada, fechaHora, cliente, ipRemota, userAgent);
+        return crearYEvaluar(derivada, fechaHora, cliente, ipRemota, userAgent, true);
     }
 
     private EvaluacionResultado crearYEvaluar(EvaluarTransaccionCommand request, OffsetDateTime fechaHora,
-                                             Cliente cliente, String direccionIp, String userAgent) {
+                                             Cliente cliente, String direccionIp, String userAgent, boolean soloDebito) {
         double promedio = cliente.getPromedioGasto() != null
                 ? cliente.getPromedioGasto().doubleValue()
                 : 0.0;
@@ -128,28 +130,31 @@ public class EvaluacionTransaccionService {
         // derivado del historial real debe alimentar las reglas del motor.
         TransaccionReferenciasResolver.Referencias referencias =
                 referenciasResolver.resolver(cliente, request, userAgent);
+        if (soloDebito && referencias.tipoTransaccion().getNaturaleza()
+                != com.lambdashield.fraude.domain.enums.NaturalezaTransaccion.DEBITO) {
+            throw new IllegalArgumentException("El portal del cliente solo permite operaciones de débito");
+        }
         String beneficiarioTipo = referencias.beneficiario().isEsConocido() ? "recurrente" : "nuevo";
 
         TransaccionEvaluable transaccionEvaluable = new TransaccionEvaluable(
-                request.monto(), request.hora(), request.pais(), request.dispositivo(),
+                request.monto().doubleValue(), request.hora(), request.pais(), request.dispositivo(),
                 request.operacionesUltimaHora(), beneficiarioTipo, request.ip());
-        List<FactorEvaluado> factoresEvaluados = deteccionFraudeService.evaluar(transaccionEvaluable, promedio);
+        List<CatalogoReglasService.FactorConfigurado> configurados = catalogoReglas.aplicar(
+                deteccionFraudeService.evaluar(transaccionEvaluable, promedio));
+        List<FactorEvaluado> factoresEvaluados = configurados.stream()
+                .map(CatalogoReglasService.FactorConfigurado::factor).toList();
         int puntaje = deteccionFraudeService.calcularPuntajeTotal(factoresEvaluados);
-        String nivel = deteccionFraudeService.clasificarNivel(puntaje);
-        EstadoTransaccion estado = estadoTransaccion(nivel);
+        NivelRiesgo nivel = NivelRiesgo.valueOf(deteccionFraudeService.clasificarNivel(puntaje).toUpperCase(Locale.ROOT));
+        EstadoTransaccion estado = nivel.estadoTransaccion();
 
         // El dinero solo se mueve en operaciones aprobadas; una retención o un
         // bloqueo no descuenta saldo. Si el saldo no alcanza, se rechaza.
-        BigDecimal monto = BigDecimal.valueOf(request.monto()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal monto = request.monto().setScale(2, RoundingMode.UNNECESSARY);
         BigDecimal saldoAnterior = cuenta.getSaldoDisponible();
         BigDecimal saldoPosterior = saldoAnterior;
         if (estado == EstadoTransaccion.APROBADA) {
-            if (monto.compareTo(saldoAnterior) > 0) {
-                throw new SaldoInsuficienteException(cuenta.getNumeroCuenta(), saldoAnterior, monto);
-            }
-            saldoPosterior = saldoAnterior.subtract(monto);
-            cuenta.setSaldoDisponible(saldoPosterior);
-            cuentaRepository.save(cuenta);
+            saldos.aplicar(cuenta, monto, referencias.tipoTransaccion().getNaturaleza(), false);
+            saldoPosterior = cuenta.getSaldoDisponible();
         }
 
         OffsetDateTime fechaTransaccion = fechaHora
@@ -181,9 +186,9 @@ public class EvaluacionTransaccionService {
         EvaluacionFraude evaluacion = EvaluacionFraude.builder()
                 .transaccion(transaccion)
                 .fraudeScore(BigDecimal.valueOf(puntaje).setScale(2, RoundingMode.HALF_UP))
-                .nivelRiesgo(nivelRiesgo(nivel))
-                .decision(decision(nivel))
-                .esPosibleFraude("alto".equals(nivel) || "critico".equals(nivel))
+                .nivelRiesgo(nivel)
+                .decision(nivel.decision())
+                .esPosibleFraude(nivel == NivelRiesgo.ALTO || nivel == NivelRiesgo.CRITICO)
                 .modeloUtilizado("Reglas RF001-RF008")
                 .versionModelo("1.0")
                 .fechaEvaluacion(fechaHora)
@@ -192,18 +197,15 @@ public class EvaluacionTransaccionService {
                 .build();
         evaluacionFraudeRepository.save(evaluacion);
 
-        for (FactorEvaluado factor : factoresEvaluados) {
-            FactorRegla catalogo = FactorRegla.porId(factor.id()).orElse(null);
-            if (catalogo == null) continue;
-            ReglaFraude regla = reglaFraudeRepository
-                    .findByCodigoRegla(catalogo.codigo())
-                    .orElse(null);
-            if (regla == null) {
-                continue;
-            }
+        for (CatalogoReglasService.FactorConfigurado configurado : configurados) {
+            FactorEvaluado factor = configurado.factor();
+            ReglaFraude regla = configurado.regla();
             EvaluacionRegla evaluacionRegla = EvaluacionRegla.builder()
                     .evaluacion(evaluacion)
                     .regla(regla)
+                    .maximoAplicado(factor.max())
+                    .etiquetaAplicada(factor.etiqueta())
+                    .versionAplicada(regla.getVersionRegla())
                     .seDisparo(factor.puntaje() > 0)
                     .valorDetectado(truncar(factor.motivo(), 250))
                     .pesoAplicado(BigDecimal.valueOf(factor.puntaje()).setScale(2, RoundingMode.HALF_UP))
@@ -214,6 +216,7 @@ public class EvaluacionTransaccionService {
         List<FactorResultado> factores = factoresEvaluados.stream()
                 .map(resultadoMapper::toFactorResultado)
                 .toList();
+        notificaciones.notificar(evaluacion, factoresEvaluados);
         return resultadoMapper.toResultado(evaluacion, factores);
     }
 
@@ -224,15 +227,14 @@ public class EvaluacionTransaccionService {
     @Transactional
     public void desactivarEvaluacion(Long idEvaluacion) {
         EvaluacionFraude evaluacion = evaluacionFraudeRepository
-                .findByIdEvaluacionAndEsActivaTrue(idEvaluacion)
+                .bloquearPorId(idEvaluacion)
                 .orElseThrow(() -> new EvaluacionNoEncontradaException(idEvaluacion));
 
+        if (!evaluacion.isEsActiva()) throw new EvaluacionNoEncontradaException(idEvaluacion);
         Transaccion transaccion = evaluacion.getTransaccion();
-        // Reverso del dinero: solo las operaciones aprobadas descontaron saldo.
+        Cuenta cuenta = bloquearCuenta(transaccion);
         if (transaccion.getEstadoTransaccion() == EstadoTransaccion.APROBADA) {
-            Cuenta cuenta = transaccion.getCuenta();
-            cuenta.setSaldoDisponible(cuenta.getSaldoDisponible().add(transaccion.getMontoTransaccion()));
-            cuentaRepository.save(cuenta);
+            saldos.aplicar(cuenta, transaccion.getMontoTransaccion(), transaccion.getTipoTransaccion().getNaturaleza(), true);
         }
 
         evaluacion.setEsActiva(false);
@@ -250,25 +252,19 @@ public class EvaluacionTransaccionService {
     @Transactional
     public void activarEvaluacion(Long idEvaluacion) {
         EvaluacionFraude evaluacion = evaluacionFraudeRepository
-                .findById(idEvaluacion)
+                .bloquearPorId(idEvaluacion)
                 .orElseThrow(() -> new EvaluacionNoEncontradaException(idEvaluacion));
         if (evaluacion.isEsActiva()) {
             throw new IllegalArgumentException("La evaluación ya está activa: " + idEvaluacion);
         }
 
-        String nivel = evaluacion.getNivelRiesgo().name().toLowerCase(Locale.ROOT);
-        EstadoTransaccion estado = estadoTransaccion(nivel);
-
+        EstadoTransaccion estado = evaluacion.getNivelRiesgo().estadoTransaccion();
         Transaccion transaccion = evaluacion.getTransaccion();
-        // Si la operación vuelve a estar aprobada, el dinero se descuenta otra vez.
+        Cuenta cuenta = bloquearCuenta(transaccion);
         if (estado == EstadoTransaccion.APROBADA) {
-            Cuenta cuenta = transaccion.getCuenta();
-            if (transaccion.getMontoTransaccion().compareTo(cuenta.getSaldoDisponible()) > 0) {
-                throw new SaldoInsuficienteException(cuenta.getNumeroCuenta(),
-                        cuenta.getSaldoDisponible(), transaccion.getMontoTransaccion());
-            }
-            cuenta.setSaldoDisponible(cuenta.getSaldoDisponible().subtract(transaccion.getMontoTransaccion()));
-            cuentaRepository.save(cuenta);
+            transaccion.setSaldoAnterior(cuenta.getSaldoDisponible());
+            saldos.aplicar(cuenta, transaccion.getMontoTransaccion(), transaccion.getTipoTransaccion().getNaturaleza(), false);
+            transaccion.setSaldoPosterior(cuenta.getSaldoDisponible());
         }
 
         evaluacion.setEsActiva(true);
@@ -283,30 +279,9 @@ public class EvaluacionTransaccionService {
                 .orElseThrow(() -> new ClienteNoEncontradoException(codigoCliente));
     }
 
-    private static NivelRiesgo nivelRiesgo(String nivel) {
-        return switch (nivel) {
-            case "bajo" -> NivelRiesgo.BAJO;
-            case "medio" -> NivelRiesgo.MEDIO;
-            case "alto" -> NivelRiesgo.ALTO;
-            default -> NivelRiesgo.CRITICO;
-        };
-    }
-
-    private static DecisionFraude decision(String nivel) {
-        return switch (nivel) {
-            case "bajo" -> DecisionFraude.APROBAR;
-            case "medio" -> DecisionFraude.MONITOREAR;
-            case "alto" -> DecisionFraude.RETENER;
-            default -> DecisionFraude.BLOQUEAR;
-        };
-    }
-
-    private static EstadoTransaccion estadoTransaccion(String nivel) {
-        return switch (nivel) {
-            case "bajo", "medio" -> EstadoTransaccion.APROBADA;
-            case "alto" -> EstadoTransaccion.RETENIDA;
-            default -> EstadoTransaccion.BLOQUEADA;
-        };
+    private Cuenta bloquearCuenta(Transaccion transaccion) {
+        return cuentaRepository.bloquearPorId(transaccion.getCuenta().getIdCuenta())
+                .orElseThrow(() -> new IllegalStateException("Cuenta inexistente"));
     }
 
     private static String codigoPais(String pais) {

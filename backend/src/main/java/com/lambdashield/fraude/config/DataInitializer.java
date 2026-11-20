@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** Coordina la carga idempotente de los datos de demostración al iniciar el backend. */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "app.demo.enabled", havingValue = "true")
 @Order(1)
 public class DataInitializer implements CommandLineRunner {
 

@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,14 +28,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ReporteApiMockMvcTest {
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
-    private static MockHttpSession analista() {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-analista");
-        session.setAttribute("nombreUsuario", "Usuario ANALISTA");
-        session.setAttribute("rol", "ANALISTA");
-        return session;
+    private MockHttpSession analista() {
+        return SesionesPrueba.crear(authService, "ANALISTA");
     }
 
     @Test
@@ -105,9 +108,7 @@ class ReporteApiMockMvcTest {
 
     @Test
     void clienteNoPuedeExportarReportes() throws Exception {
-        MockHttpSession cliente = new MockHttpSession();
-        cliente.setAttribute("usuario", "prueba-cliente");
-        cliente.setAttribute("rol", "CLIENTE");
+        MockHttpSession cliente = SesionesPrueba.crear(authService, "CLIENTE");
 
         mockMvc.perform(get("/api/v1/report/export?formato=csv").session(cliente))
                 .andExpect(status().isForbidden());

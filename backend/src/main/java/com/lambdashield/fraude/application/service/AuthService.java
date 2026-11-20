@@ -1,20 +1,15 @@
 package com.lambdashield.fraude.application.service;
 
-import com.lambdashield.fraude.domain.entity.Cliente;
-import com.lambdashield.fraude.domain.entity.Rol;
-import com.lambdashield.fraude.domain.entity.UsuarioRol;
 import com.lambdashield.fraude.domain.entity.UsuarioSistema;
 import com.lambdashield.fraude.domain.enums.EstadoUsuario;
 import com.lambdashield.fraude.repository.ClienteRepository;
-import com.lambdashield.fraude.repository.UsuarioRolRepository;
 import com.lambdashield.fraude.repository.UsuarioSistemaRepository;
+import java.time.OffsetDateTime;
+import java.util.Locale;
+import java.util.Optional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.Optional;
 
 /**
  * Autenticación contra usuario_sistema / usuario_rol / rol.
@@ -29,104 +24,66 @@ public class AuthService {
             String usuario,
             String nombreCompleto,
             String rol,
-            String codigoCliente
-    ) {}
+            String codigoCliente,
+            String credencial
+    ) implements java.security.Principal, java.io.Serializable {
+        @Override public String getName() { return usuario; }
+        @Override public String toString() { return usuario; }
+    }
 
     private final UsuarioSistemaRepository usuarioRepository;
-    private final UsuarioRolRepository usuarioRolRepository;
+    private final RolUsuarioService roles;
     private final ClienteRepository clienteRepository;
     private final PasswordEncoder passwordEncoder;
+    private final String hashSimulado;
 
     public AuthService(UsuarioSistemaRepository usuarioRepository,
-                       UsuarioRolRepository usuarioRolRepository,
+                       RolUsuarioService roles,
                        ClienteRepository clienteRepository,
                        PasswordEncoder passwordEncoder) {
         this.usuarioRepository = usuarioRepository;
-        this.usuarioRolRepository = usuarioRolRepository;
+        this.roles = roles;
         this.clienteRepository = clienteRepository;
         this.passwordEncoder = passwordEncoder;
+        this.hashSimulado = passwordEncoder.encode(java.util.UUID.randomUUID().toString());
     }
 
     @Transactional
     public Optional<UsuarioSesion> autenticar(String usuario, String clave) {
-        if (usuario == null || usuario.isBlank() || clave == null || clave.isBlank()) {
+        if (usuario == null || usuario.isBlank() || usuario.length() > 80 || clave == null || clave.isBlank() || clave.length() > 128) {
             return Optional.empty();
         }
 
-        Optional<UsuarioSistema> encontrado = usuarioRepository.findByNombreUsuario(usuario.trim());
+        Optional<UsuarioSistema> encontrado = usuarioRepository.findByNombreUsuario(usuario.trim().toLowerCase(Locale.ROOT));
         if (encontrado.isEmpty()) {
+            passwordEncoder.matches(clave, hashSimulado);
             return Optional.empty();
         }
 
         UsuarioSistema usuarioSistema = encontrado.get();
-        if (usuarioSistema.getEstadoUsuario() != EstadoUsuario.ACTIVO) {
+        boolean claveValida = passwordEncoder.matches(clave, usuarioSistema.getHashPassword());
+        if (usuarioSistema.getEstadoUsuario() != EstadoUsuario.ACTIVO || !claveValida) {
             return Optional.empty();
         }
-        if (!passwordEncoder.matches(clave, usuarioSistema.getHashPassword())) {
-            return Optional.empty();
+
+        Optional<UsuarioSesion> sesion = sesionDe(usuarioSistema);
+        if (sesion.isPresent()) {
+            usuarioSistema.setUltimoAcceso(OffsetDateTime.now());
         }
-
-        usuarioSistema.setUltimoAcceso(OffsetDateTime.now());
-        usuarioRepository.save(usuarioSistema);
-
-        String codigoRol = obtenerRolCodigo(usuarioSistema.getIdUsuario());
-        String codigoCliente = obtenerCodigoCliente(usuarioSistema.getIdCliente());
-        return Optional.of(new UsuarioSesion(
-                usuarioSistema.getNombreUsuario(),
-                usuarioSistema.getNombres(),
-                codigoRol,
-                codigoCliente
-        ));
+        return sesion;
     }
 
     @Transactional(readOnly = true)
-    public Optional<UsuarioSesion> obtenerUsuarioInfo(String usuario) {
+    public Optional<UsuarioSesion> obtenerSesionActiva(String usuario) {
         return usuarioRepository.findByNombreUsuario(usuario)
-                .map(u -> new UsuarioSesion(
-                        u.getNombreUsuario(),
-                        u.getNombres(),
-                        obtenerRolCodigo(u.getIdUsuario()),
-                        obtenerCodigoCliente(u.getIdCliente())
-                ));
+                .filter(u -> u.getEstadoUsuario() == EstadoUsuario.ACTIVO).flatMap(this::sesionDe);
     }
 
-    @Transactional(readOnly = true)
-    public String obtenerNombreUsuario(String usuario) {
-        return usuarioRepository.findByNombreUsuario(usuario)
-                .map(UsuarioSistema::getNombres)
-                .orElse(usuario);
-    }
-
-    @Transactional(readOnly = true)
-    public String obtenerRol(String usuario) {
-        return usuarioRepository.findByNombreUsuario(usuario)
-                .map(u -> obtenerRolCodigo(u.getIdUsuario()))
-                .orElse("CLIENTE");
-    }
-
-    @Transactional(readOnly = true)
-    public String obtenerCodigoCliente(String usuario) {
-        return usuarioRepository.findByNombreUsuario(usuario)
-                .map(u -> obtenerCodigoCliente(u.getIdCliente()))
-                .orElse(null);
-    }
-
-    private String obtenerRolCodigo(Long idUsuario) {
-        List<String> codigos = usuarioRolRepository.findByUsuario_IdUsuario(idUsuario)
-                .stream()
-                .map(UsuarioRol::getRol)
-                .filter(rol -> rol != null && rol.isEsActivo())
-                .map(Rol::getCodigoRol)
-                .toList();
-
-        // Si un usuario tuviera más de un rol, se aplica el de mayor privilegio.
-        if (codigos.contains("ADMIN")) {
-            return "ADMIN";
-        }
-        if (codigos.contains("ANALISTA")) {
-            return "ANALISTA";
-        }
-        return "CLIENTE";
+    private Optional<UsuarioSesion> sesionDe(UsuarioSistema usuario) {
+        String rol = roles.codigo(usuario.getIdUsuario());
+        if ("SIN_ROL".equals(rol)) return Optional.empty();
+        return Optional.of(new UsuarioSesion(usuario.getNombreUsuario(), usuario.getNombres(), rol,
+                obtenerCodigoCliente(usuario.getIdCliente()), usuario.getHashPassword()));
     }
 
     private String obtenerCodigoCliente(Long idCliente) {
@@ -134,6 +91,7 @@ public class AuthService {
             return null;
         }
         return clienteRepository.findById(idCliente)
+                .filter(com.lambdashield.fraude.domain.entity.Cliente::isEsActivo)
                 .map(c -> c.getCodigoCliente())
                 .orElse(null);
     }

@@ -250,6 +250,9 @@ CREATE TABLE evaluacion_regla (
     se_disparo BOOLEAN NOT NULL,
     valor_detectado VARCHAR(250),
     peso_aplicado NUMERIC(5,2) NOT NULL,
+    maximo_aplicado INTEGER,
+    etiqueta_aplicada VARCHAR(150),
+    version_aplicada INTEGER,
     detalle_json TEXT,
 
     FOREIGN KEY (id_evaluacion)
@@ -418,3 +421,22 @@ CREATE TABLE auditoria (
         REFERENCES usuario_sistema(id_usuario)
 );
 
+
+-- Notificaciones personales del portal
+CREATE TABLE IF NOT EXISTS notificacion_usuario (
+    id_notificacion BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_usuario BIGINT NOT NULL REFERENCES usuario_sistema(id_usuario) ON DELETE CASCADE,
+    id_evaluacion BIGINT NOT NULL REFERENCES evaluacion_fraude(id_evaluacion) ON DELETE CASCADE,
+    tipo VARCHAR(20) NOT NULL,
+    titulo VARCHAR(100) NOT NULL,
+    mensaje VARCHAR(1000) NOT NULL,
+    fecha_creacion TIMESTAMPTZ NOT NULL,
+    fecha_lectura TIMESTAMPTZ,
+    CONSTRAINT uq_notificacion_usuario_evaluacion_tipo UNIQUE (id_usuario, id_evaluacion, tipo)
+);
+CREATE INDEX IF NOT EXISTS ix_notificacion_usuario_fecha
+    ON notificacion_usuario(id_usuario, fecha_creacion DESC, id_notificacion DESC);
+CREATE INDEX IF NOT EXISTS ix_notificacion_usuario_pendiente
+    ON notificacion_usuario(id_usuario) WHERE fecha_lectura IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_beneficiario_cliente_cuenta
+    ON beneficiario(id_cliente, numero_cuenta_destino);

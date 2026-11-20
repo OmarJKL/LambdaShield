@@ -1,111 +1,169 @@
-# Lambda Shield — Motor antifraude
+# 03 — Motor de reglas antifraude
 
-## 1. Cómo se evalúa una operación
+[Índice](README.md) · [Funcionalidades](02_FUNCIONALIDADES.md)
 
-Cada transferencia pasa por ocho reglas (RF001–RF008). Cada una devuelve un factor con un puntaje parcial y un máximo. El puntaje total es la suma de los parciales, limitada a 100. El nivel y la decisión se derivan del total.
+## 1. Modelo de evaluación
 
-| Puntaje | Nivel | Decisión | Acción |
-| :---: | :--- | :--- | :--- |
-| 0–29 | Bajo | Aprobar | Se ejecuta la transferencia |
-| 30–59 | Medio | Monitorear | Se ejecuta con seguimiento |
-| 60–79 | Alto | Retener / Alertar | Se pausa para revisión |
-| 80–100 | Crítico | Bloquear | Se detiene y se genera alerta |
+Cada implementación de `ReglaEvaluable` recibe `TransaccionEvaluable` y el promedio de gasto del cliente, y devuelve un `FactorEvaluado`: identidad, etiqueta, puntos, máximo de referencia y motivo.
 
-## 2. Reglas
+`DeteccionFraudeService` ejecuta las implementaciones inyectadas. `CatalogoReglasService` relaciona sus factores con `regla_fraude`, descarta las reglas inactivas y adapta sus puntos al peso configurado. La suma aplicada se limita a 100.
 
-### RF001 — Monto inusual (peso 25)
+| Score | Nivel | Decisión | Estado de transacción |
+| --- | --- | --- | --- |
+| 0–29 | BAJO | APROBAR | APROBADA |
+| 30–59 | MEDIO | MONITOREAR | APROBADA |
+| 60–79 | ALTO | RETENER | RETENIDA |
+| 80–100 | CRITICO | BLOQUEAR | BLOQUEADA |
 
-Compara el monto de la operación con el promedio de gasto del cliente (`promedio_gasto`).
+Una decisión de riesgo no prueba fraude confirmado. El motor es heurístico y explicable; no es un modelo entrenado ni asigna una probabilidad estadística calibrada.
 
-| Proporción monto/promedio | Puntaje |
-| :--- | :---: |
-| ≤ 1.5x | 0 |
-| > 1.5x y ≤ 3.0x | 5–15 (gradual) |
-| > 3.0x y < 5.0x | 15–22 (gradual) |
-| ≥ 5.0x | 25 |
+## 2. Catálogo e identidades
 
-Ejemplo: un cliente con promedio de S/ 180 que envía S/ 900 (5x) recibe 25 pts.
+| Código | Identidad de factor | Regla | Máximo inicial/de referencia |
+| --- | --- | --- | --- |
+| RF001 | `monto` | Monto inusual | 25 |
+| RF002 | `dispositivo` | Dispositivo nuevo | 15 |
+| RF003 | `ip` | IP nueva | 10 |
+| RF004 | `ubicacion` | País o región declarada | 30 |
+| RF005 | `horario` | Horario inusual | 10 |
+| RF006 | `velocidad` | Frecuencia de operaciones | 25 |
+| RF007 | `viaje_imposible` | Heurística de país, frecuencia e IP | 40 |
+| RF008 | `beneficiario` | Beneficiario nuevo con monto alto | 20 |
 
-### RF002 — Dispositivo nuevo (peso 15)
+`FactorRegla` mantiene la relación estable código/identidad. Las implementaciones están en `domain/fraud/rule`; `FraudRuleConfiguration` registra sus beans sin anotar las reglas con Spring.
 
-Si el dispositivo no está en el conjunto de dispositivos conocidos del cliente: 15 pts. Si es habitual: 0.
+Los valores de las siguientes secciones son los puntos de referencia, antes de adaptar el peso de BD.
 
-### RF003 — IP nueva (peso 10)
+## 3. RF001 — Monto inusual
 
-Si la IP no está registrada previamente para el cliente: 10 pts. Si es habitual: 0.
+Se calcula `proporcion = monto / promedio`. Si el promedio no es positivo, esta regla utiliza 100 como respaldo.
 
-### RF004 — País nuevo (peso 30)
+| Proporción | Puntos antes de redondear |
+| --- | --- |
+| ≤ 1.5 | 0 |
+| > 1.5 y ≤ 3 | Interpolación lineal de 5 a 15 |
+| > 3 y < 5 | Interpolación lineal de 15 a 22 |
+| ≥ 5 | 25 |
 
-| Ubicación | Puntaje |
-| :--- | :---: |
-| local (Perú) | 0 |
-| regional (Chile, Colombia, Ecuador) | 15 |
-| alto_riesgo (otro) | 30 |
+El resultado se redondea a entero con `Math.round`. Hay saltos intencionales entre tramos: en 1.5 exacto son 0 puntos y justo por encima se parte de 5; en 5 exacto se asignan 25 en lugar de continuar hasta 22.
 
-### RF005 — Horario inusual (peso 10)
+El promedio es el campo `cliente.promedio_gasto`. El código no recalcula automáticamente una media móvil de 30 días, aunque algunos motivos incluyan ese lenguaje histórico.
 
-Operaciones entre 00:00 y 04:59: 10 pts. Resto del día: 0.
+## 4. RF002 — Dispositivo nuevo
 
-### RF006 — Alta frecuencia (peso 25)
+Asigna 15 cuando `dispositivo` es `nuevo`, y 0 en otro caso válido.
 
-Gradual según el número de operaciones en la última hora:
+Para CLIENTE la señal se deriva de `DeviceFingerprint`: combina código del cliente con navegador y sistema operativo normalizados a partir del User-Agent. `DispositivoService` busca la huella exacta y admite el formato antiguo con sufijo UUID; al reutilizarlo lo normaliza y actualiza el último uso.
 
-| Operaciones en la última hora | Puntaje |
-| :--- | :---: |
+Un dispositivo nuevo no se vuelve confiable automáticamente por repetir solicitudes. La señal depende de `es_conocido`. La normalización no identifica físicamente un dispositivo ni verifica criptográficamente al navegador; el User-Agent es declarable y varios equipos pueden compartir la misma huella.
+
+El simulador sin User-Agent usa identidades separadas `Simulador|Reconocido` o `Simulador|Nuevo`.
+
+## 5. RF003 — IP nueva
+
+Asigna 10 cuando la señal IP es `nueva`, y 0 cuando es `conocida`.
+
+Para CLIENTE se consulta la dirección remota de la conexión. Es conocida si aparece en un dispositivo conocido o en una transacción previa del cliente. Esa búsqueda histórica no exige que la transacción previa esté aprobada; por tanto no es una lista de IP verificadas por una autenticación adicional.
+
+No se confía directamente en un encabezado `X-Forwarded-For` enviado por el cliente. Detrás de un proxy, la dirección observada debe interpretarse según la configuración real del despliegue.
+
+## 6. RF004 — Ubicación
+
+| `pais` | Puntos |
+| --- | --- |
+| `local` | 0 |
+| `regional` | 15 |
+| `alto_riesgo` | 30 |
+
+La ubicación se declara en el formulario; no se deriva de una base GeoIP. La persistencia representa `local` como PE, `regional` como CL y alto riesgo como XX; la ciudad se guarda actualmente como Lima. Estos datos son representaciones simplificadas, no geolocalización validada.
+
+## 7. RF005 — Horario inusual
+
+Asigna 10 si la hora está entre 0 y 4 inclusive; de 5 a 23 asigna 0. La hora del portal la decide el servidor; ADMIN puede introducirla manualmente.
+
+La fecha de transacción se guarda con la hora evaluada y minutos/segundos en cero. La fecha de evaluación conserva el instante del procesamiento. Los reportes filtran por fecha de evaluación; los movimientos del dashboard usan fecha de transacción.
+
+## 8. RF006 — Frecuencia
+
+| Operaciones previas en la última hora | Puntos |
+| --- | --- |
 | 0–1 | 0 |
-| 2–3 | 5–12 (gradual) |
-| 4–5 | 15–20 (gradual) |
+| 2 | 5 |
+| 3 | 12 |
+| 4 | 15 |
+| 5 | 20 |
 | ≥ 6 | 25 |
 
-### RF007 — Viaje imposible (peso 40)
+Los tramos 2–3 y 4–5 se expresan en código mediante interpolación. Para CLIENTE se cuentan evaluaciones activas posteriores a `ahora - 1 hora`, antes de insertar la operación actual. No se cuentan todos los intentos HTTP ni los errores de validación; las evaluaciones desactivadas quedan fuera.
 
-Heurística simplificada (país + frecuencia + IP):
+Este conteo y los límites HTTP son mecanismos distintos. El bloqueo de cuenta protege el saldo, pero no convierte este cálculo previo de frecuencia en un contador atómico de todos los intentos concurrentes.
 
-- 40 pts si el país es regional o de alto riesgo y hay ≥ 2 operaciones en la última hora.
-- 28 pts si el país es de alto riesgo y la IP es nueva.
-- 0 en caso contrario.
+## 9. RF007 — Viaje imposible
 
-Es una aproximación pendiente de geolocalización real.
+Las condiciones se evalúan en este orden:
 
-### RF008 — Beneficiario nuevo con monto alto (peso 20)
+1. País `regional` o `alto_riesgo` y frecuencia ≥ 2: 40 puntos.
+2. Si no se cumplió lo anterior, país `alto_riesgo` e IP nueva: 28 puntos.
+3. En otro caso: 0.
 
-20 pts si el destinatario es nuevo **y** el monto supera el umbral (`promedio * 1.5`, mínimo 500). Beneficiario frecuente o monto por debajo del umbral: 0.
+No se calculan distancia, velocidad de desplazamiento ni coordenadas. La regla detecta una combinación de señales simplificadas y no demuestra físicamente un viaje imposible.
 
-## 3. Derivación de factores en el servidor
+## 10. RF008 — Beneficiario nuevo y monto alto
 
-Para el portal del cliente los factores no se declaran: se derivan para evitar que el cliente se auto-califique con score 0.
+El umbral es `promedio × 1.5` cuando el promedio es positivo. Si no lo es, el umbral de respaldo es 500. **No existe un mínimo general de 500** para clientes con promedio positivo.
 
-- **Hora**: del reloj del servidor.
-- **Frecuencia**: conteo de evaluaciones activas del cliente en la última hora (PostgreSQL).
-- **Dispositivo**: se compara el User-Agent con los dispositivos conocidos; si no está, es nuevo.
-- **IP**: se compara con dispositivos y transacciones previas; si no está, es nueva.
-- **Beneficiario**: se deriva del historial real del cliente por nombre del destinatario.
-- **Monto, país y categoría**: vienen del formulario (declarados por el cliente).
+Se asignan 20 puntos si el beneficiario es nuevo y `monto > umbral`. En el umbral exacto son 0; un recurrente también recibe 0.
 
-## 4. Persistencia de la evaluación
+Con número de destino se busca primero por cliente y cuenta. Los contactos precargados se reconocen como conocidos; el servidor usa sus datos guardados. Para cuentas internas nuevas resuelve el titular real y rechaza la cuenta propia; para cuentas externas exige nombre al crear el contacto. La existencia del contacto no prueba una transferencia previa aprobada ni una titularidad externa verificada.
 
-Cada evaluación guarda:
-- La transacción (monto, saldos, IP, país, canal, dispositivo, beneficiario).
-- La evaluación (puntaje, nivel, decisión, modelo, fecha, duración).
-- Cada factor aplicado en `evaluacion_regla` (si se disparó, valor detectado, peso aplicado).
+Sin número, con nombre de destinatario se busca por cliente y nombre recortado: la primera creación queda como nueva y una siguiente resolución marca ese registro como conocido. No se exige que una operación anterior haya sido aprobada. La identidad no se basa en una cuenta bancaria verificada ni se normaliza ignorando mayúsculas.
 
-Las evaluaciones y transacciones no se borran: se marcan como inactivas (`es_activa = false`) y la transacción pasa a `REVERSADA`.
+Sin nombre, el resolver admite beneficiarios genéricos según el tipo declarado. La pantalla del portal envía nombre y cuenta, pero el DTO conserva ambos opcionales para compatibilidad; no debe afirmarse que todos los clientes HTTP obtengan siempre un beneficiario verificado por historial nominal.
 
-## 5. Ejemplo de evaluación
+## 11. Pesos configurables y errores de catálogo
 
-Cliente con promedio de gasto S/ 180.00, dispositivo nuevo, IP nueva, país regional, hora 02:00, 3 operaciones en la última hora, beneficiario nuevo, monto S/ 900.00:
+Para cada regla activa:
 
-| Regla | Puntaje | Motivo |
-| :--- | :---: | :--- |
-| RF001 Monto inusual | 25 | Monto 5.0x excede el umbral crítico (>5x promedio_30d) |
-| RF002 Dispositivo nuevo | 15 | Dispositivo no reconocido sin historial previo |
-| RF003 IP nueva | 10 | Conexión desde una IP no registrada |
-| RF004 País nuevo | 15 | Operación desde región (CL, CO, EC) |
-| RF005 Horario inusual | 10 | Operación entre 00:00 y 04:59 |
-| RF006 Alta frecuencia | 12 | 3 operaciones en la última hora |
-| RF007 Viaje imposible | 40 | Heurística país + frecuencia |
-| RF008 Beneficiario nuevo + monto alto | 20 | Nuevo destinatario con monto elevado |
+```text
+puntosAplicados = redondear_HALF_UP(puntosReferencia × pesoBD / maximoReferencia)
+score = min(100, suma de puntosAplicados)
+```
 
-**Total: 100 (limitado al tope) → Crítico → Bloqueada.**
+El peso de BD debe ser un entero entre 0 y 100, aunque su columna sea decimal. Una regla activa con peso 0 conserva su factor con máximo y puntos 0; una inactiva no aparece entre los factores aplicados.
 
-En una operación normal (monto S/ 150, dispositivo habitual, IP conocida, país local, hora 14:00, 0 operaciones previas, beneficiario recurrente) el total sería 0 → Bajo → Aprobada, y el saldo se descuenta de la cuenta.
+Ejemplo: RF002 con señal nueva produce 15/15 en dominio. Con peso BD 30 produce 30/30 en aplicación. Para RF004 regional, 15/30 con peso 25 produce 13/25 por redondeo HALF_UP.
+
+Se rechaza la evaluación si falta una regla correspondiente a un factor, si una regla activa no tiene identidad implementada o si el peso activo no es válido. El error no se transforma en una evaluación incompleta aceptada. No se interpretan automáticamente `parametros_json` ni fechas de vigencia como parámetros operativos del motor; el código actual aplica principalmente `es_activa` y `peso`.
+
+## 12. Conservación histórica
+
+Cada `evaluacion_regla` guarda:
+
+- `peso_aplicado`: puntos obtenidos, no el peso máximo.
+- `maximo_aplicado`: máximo configurado al evaluar.
+- `etiqueta_aplicada`: nombre mostrado al evaluar.
+- `version_aplicada`: versión de catálogo utilizada.
+- `se_disparo` y `valor_detectado`: condición y motivo, este último limitado a 250 caracteres al persistir.
+
+Cambiar nombre, peso o activación del catálogo no reescribe esas copias nuevas. Registros anteriores sin copia usan el catálogo como respaldo; la migración rellena lo que puede con la configuración disponible al ejecutarse.
+
+Reactivar una evaluación conserva su nivel guardado; no genera otro score ni aplica los pesos vigentes de nuevo. `versionModelo` se registra actualmente como 1.0 y `duracionMs` como 0; no son prueba de una medición de latencia.
+
+## 13. Ejemplo completo
+
+Con pesos iniciales: promedio 180, monto 900, dispositivo nuevo, IP nueva, país regional, hora 2, tres operaciones previas y beneficiario nuevo:
+
+| Regla | Puntos |
+| --- | --- |
+| RF001 | 25 |
+| RF002 | 15 |
+| RF003 | 10 |
+| RF004 | 15 |
+| RF005 | 10 |
+| RF006 | 12 |
+| RF007 | 40 |
+| RF008 | 20 |
+| Suma | 147 |
+| Score limitado | 100 |
+
+Resultado: CRITICO, BLOQUEAR, transacción BLOQUEADA y sin descuento de saldo. Un escenario habitual sin señales obtiene 0 y puede aprobarse, siempre que se cumplan las demás condiciones del caso de uso, incluido el saldo disponible para un débito.

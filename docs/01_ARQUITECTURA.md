@@ -1,84 +1,170 @@
-# Lambda Shield — Arquitectura detallada
+# 01 — Arquitectura y decisiones técnicas
 
-## 1. Visión general
+[Índice](README.md) · [Funcionalidades](02_FUNCIONALIDADES.md)
 
-Lambda Shield es una aplicación bancaria de detección de fraude en tiempo real. Combina un portal de banca en línea para clientes con un panel de control para analistas y administradores, y un motor heurístico de reglas (RF001–RF008) que puntúa cada transferencia entre 0 y 100.
+## 1. Forma de la aplicación
 
-- **Stack:** Java 21 LTS, Spring Boot 4.1.1, Spring Data JPA, Thymeleaf, Bootstrap 5, PostgreSQL 18 (H2 en modo PostgreSQL para pruebas).
-- **Patrón:** arquitectura N capas con separación física de frontend y backend sobre un único artefacto Maven.
-- **Persistencia:** JPA con `ddl-auto=validate` (el esquema se aplica manualmente y Hibernate comprueba el mapeo al arrancar).
+Lambda Shield es una aplicación Spring Boot con un solo `pom.xml` y un único artefacto desplegable. `backend/` y `frontend/` separan archivos por responsabilidad, no son dos servicios ni módulos Maven independientes.
 
-## 2. Estructura del repositorio
+Maven compila `backend/src/main/java`, toma las pruebas de `backend/src/test/java` e incorpora los recursos de `backend/src/main/resources` y `frontend/src/main/resources` al classpath. Thymeleaf renderiza las plantillas y Spring sirve los recursos estáticos.
 
-```
-frontend/src/main/resources/
-├── templates/           # Vistas Thymeleaf (dashboard, transacciones, reportes, operacion, simulador, usuarios, login)
-├── static/              # CSS, JavaScript e imágenes
-│   ├── js/              # auth.js, panel.js, transacciones.js, simulador.js, operacion.js, reportes.js, usuarios.js
-│   └── css/estilos.css  # Sistema de diseño (variables, componentes)
-backend/src/main/
-├── java/com/lambdashield/fraude/
-│   ├── presentation/    # Capa de presentación (HTTP y vistas)
-│   │   ├── api/rest/    # Controladores REST (/api/v1/**)
-│   │   ├── web/         # Controladores MVC (Thymeleaf)
-│   │   ├── dto/         # Contratos JSON de entrada y salida
-│   │   ├── mapper/      # Traduce modelos de aplicación a DTO y etiquetas visuales
-│   │   ├── export/      # Serialización CSV, Excel y PDF
-│   │   ├── security/    # Interceptor y política de autorización por rol
-│   │   └── exception/   # Traducción de errores a HTTP/vistas
-│   ├── application/     # Capa de aplicación (casos de uso)
-│   │   ├── command/     # Comandos de entrada
-│   │   ├── model/       # Modelos de resultado independientes de la interfaz
-│   │   ├── mapper/      # Entidades JPA -> modelos de aplicación
-│   │   └── service/     # Casos de uso, consultas y coordinación
-│   ├── domain/          # Capa de dominio (sin dependencias hacia otras capas)
-│   │   ├── entity/      # Entidades JPA del modelo de negocio
-│   │   ├── enums/       # Estados y tipos del dominio
-│   │   ├── fraud/       # Motor antifraude: factores, reglas evaluables
-│   │   ├── device/      # Huella de dispositivo
-│   │   └── customer/    # Reglas de presentación del nombre del cliente
-│   ├── repository/      # Persistencia: contratos Spring Data JPA
-│   └── config/          # Composición y configuración (raíz de dependencias)
-│       └── seed/        # Sembradores demo idempotentes por responsabilidad
-└── resources/           # application.properties y scripts SQL
-backend/src/test/         # Pruebas unitarias, de integración y de arquitectura
+```text
+Navegador
+  ├─ GET de página → filtros de seguridad → controlador MVC → Thymeleaf → HTML
+  ├─ solicitud API → filtros de seguridad → controlador REST → DTO / archivo
+  └─ CSS / JavaScript / imágenes → recursos estáticos permitidos
+                                  ↓
+                           servicios de aplicación
+                                  ↓
+                          dominio + repositorios JPA
+                                  ↓
+                              PostgreSQL
 ```
 
-## 3. Capas y reglas de dependencia
+No se requiere Node.js en el servidor de la aplicación. Se usa únicamente para verificar JavaScript en desarrollo y CI.
 
-El flujo es unidireccional: `presentation → application → domain`, con `repository` como persistencia usada por `application`. `config` es la raíz de composición y la única que puede conocer a todas las demás.
+## 2. Capas y paquetes
 
-<|message|> Capa | Qué vive ahí | Qué no puede hacer |
-| :--- | :--- | :--- |
-| `presentation` | Controladores REST/MVC, DTO, mappers HTTP, exportadores | No accede a `repository` ni a `domain` directamente |
-| `application` | Casos de uso, comandos, modelos de resultado, mappers de entidad | No depende de `jakarta.servlet`, `org.springframework.web` ni de `config` |
-| `domain` | Entidades JPA, enums, reglas puras (`ReglaEvaluable`) | Sin dependencias de Spring |
-| `repository` | Contratos Spring Data JPA | Solo la usa `application` y `config` |
-| `config` | Composición, sembradores, demo | Es la raíz de dependencias |
+Todos los paquetes Java de producción cuelgan de `com.lambdashield.fraude`.
 
-Las reglas están verificadas automáticamente por **ArchUnit** en `ArquitecturaCapasTest` (6 reglas): orden de capas, dominio sin Spring, aplicación sin web, controladores en `presentation`, controladores sin acceso a repositorios y sin ciclos entre módulos.
+| Paquete | Responsabilidad | Ejemplos |
+| --- | --- | --- |
+| `presentation.api.rest` | Adaptar HTTP/JSON y despachar casos de uso | `EvaluationApiController`, `UserApiController` |
+| `presentation.web` | Preparar modelos y seleccionar vistas | `DashboardController`, `OperacionClienteController` |
+| `presentation.dto` | Contratos y validación HTTP | `TransaccionCrearRequest`, `EvaluacionResponse` |
+| `presentation.mapper` | Formatos y etiquetas de interfaz | `EvaluacionResponseMapper`, `DashboardResponseMapper` |
+| `presentation.export` | Serializar reportes | Exportadores CSV, XLSX y PDF |
+| `presentation.security` | Políticas y filtros HTTP | `AuthorizationPolicy`, `SessionValidationFilter`, `RequestRateLimitFilter` |
+| `presentation.exception` | Traducir excepciones a respuestas | `GlobalExceptionHandler` |
+| `application.command` | Entradas de casos de uso | `EvaluarTransaccionCommand` |
+| `application.model` | Resultados sin detalles HTTP | `EvaluacionResultado`, `ResumenFinanciero` |
+| `application.mapper` | Traducir entidades a resultados | `EvaluacionResultadoMapper` |
+| `application.service` | Coordinar negocio y persistencia | Evaluaciones, saldos, consultas, usuarios y catálogos |
+| `domain.entity` | Mapeo del esquema de negocio | `Cuenta`, `Transaccion`, `EvaluacionRegla` |
+| `domain.enums` | Estados y decisiones | `NivelRiesgo`, `EstadoTransaccion` |
+| `domain.fraud` | Factores y reglas de riesgo | `FactorRegla`, `TransaccionEvaluable`, reglas RF |
+| `domain.device` | Normalización de User-Agent | `DeviceFingerprint` |
+| `domain.customer` | Formato del nombre de cliente | `NombreClienteFormatter` |
+| `repository` | Consultas y operaciones JPA | `CuentaRepository`, `EvaluacionFraudeRepository` |
+| `config` | Composición, seguridad y carga opcional | `SecurityConfig`, `FraudRuleConfiguration`, sembradores |
 
-## 4. Separación REST vs no REST
+Las entidades usan JPA y Lombok: el dominio no es independiente de toda biblioteca. Las reglas antifraude sí son funciones de dominio sin anotaciones Spring. Se evita `@Data` en entidades para no generar igualdad o `toString` sobre relaciones bidireccionales.
 
-- **REST** (`presentation/api/rest`): `/api/v1/evaluation`, `/api/v1/metric`, `/api/v1/rule`, `/api/v1/report`, `/api/v1/user`. Devuelven JSON.
-- **MVC** (`presentation/web`): `/`, `/login`, `/logout`, `/operacion`, `/transacciones`, `/reglas`, `/reportes`, `/simulador`, `/usuarios`. Devuelven HTML Thymeleaf.
-- El interceptor `AuthInterceptor` y la política `AuthorizationPolicy` distinguen ambos mundos: sin sesión, `/api/**` responde `401` JSON y las páginas redirigen a `/login`.
+## 3. Dependencias verificadas
 
-## 5. Autorización por rol
+`ArquitecturaCapasTest` contiene seis reglas:
 
-| Rol | Páginas | API |
-| :--- | :--- | :--- |
-| ADMIN | Todas | Todos los métodos, incluidos PATCH de evaluaciones, CRUD de usuarios y su DELETE |
-| ANALISTA | Inicio, transacciones, reglas, reportes | Solo GET de `/api/**`, excepto `/api/v1/user` (reservado a ADMIN) |
-| CLIENTE | Solo `/operacion` | Solo POST `/api/v1/evaluation` para su propio cliente |
+| Regla | Restricción |
+| --- | --- |
+| `respetaLasCapas` | Presentación solo la accede configuración; aplicación la acceden presentación/configuración; persistencia, aplicación/configuración; dominio, aplicación/persistencia/configuración |
+| `dominioSinSpring` | Sin dependencias Spring desde dominio |
+| `aplicacionSinDetallesWeb` | Sin Servlet, Spring Web o UI desde aplicación |
+| `controladoresEnPresentacion` | Todo controlador debe estar en presentación |
+| `controladoresSinRepositorios` | Los controladores no dependen directamente de repositorios |
+| `sinCiclosEntreModulos` | Sin ciclos entre paquetes de primer nivel |
 
-`DELETE` está bloqueado en toda la API excepto `/api/v1/user/{id}` (gestión de usuarios, solo ADMIN). Las evaluaciones usan baja lógica con `PATCH`.
+Los servicios usan Spring Data directamente. No hay una capa adicional de puertos/adaptadores de persistencia. Las entidades JPA se convierten a modelos de aplicación antes de cruzar a presentación; no se exponen como respuestas REST.
 
-## 6. Seguridad
+## 4. Componentes de aplicación
 
-- Credenciales en BCrypt sobre `usuario_sistema`; comparación con `matches`.
-- `request.changeSessionId()` tras autenticar (evita session fixation).
-- `@Valid` y Bean Validation en `TransaccionCrearRequest` y en los DTO de usuarios.
-- `GlobalExceptionHandler` traduce validaciones a `400 {"errores":[...]}`, cliente inexistente a `404`, método no permitido a `405`, tipo de contenido a `415`.
-- El cliente no puede declarar factores de riesgo: hora, frecuencia, dispositivo e IP se derivan en el servidor.
-- El portal del cliente usa el `codigoCliente` de la sesión y nunca el del body.
+| Componente | Función |
+| --- | --- |
+| `EvaluacionTransaccionService` | Crear/evaluar, persistir y cambiar el estado activo de operaciones |
+| `DeteccionFraudeService` | Ejecutar implementaciones de reglas, sumar y clasificar |
+| `CatalogoReglasService` | Aplicar activación/pesos de BD y asociar reglas a factores |
+| `MovimientoSaldoService` | Aplicar débito/crédito y su reverso sobre una cuenta bloqueada |
+| `TransaccionReferenciasResolver` | Resolver tipo, canal, dispositivo y beneficiario |
+| `BeneficiarioConsultaService` | Agenda numerada del cliente autenticado |
+| `NotificacionService` | Avisos persistentes, bandeja y estado de lectura por usuario |
+| `DispositivoService` | Buscar/reutilizar huellas y atender formatos antiguos |
+| `ClienteContextService` | Consultar señales de dispositivo e IP |
+| `ClienteService` | Datos del cliente y elección de cuenta principal |
+| `EvaluacionConsultaService` | Filtrar en BD y cargar factores por lote |
+| `EvaluacionMetricasService` | Obtener agregados de riesgo |
+| `DashboardResumenService` | Saldo, ingresos/egresos y variaciones |
+| `DashboardMovimientosService` | Serie diaria y actividad reciente |
+| `PeriodoConsulta` | Rangos actual/anterior del dashboard |
+| `ReporteResumenService` | Resumir el conjunto filtrado del reporte |
+| `UsuarioAdminService` | CRUD, claves, roles y reglas administrativas |
+| `AuthService` / `RolUsuarioService` | Validar acceso y resolver la identidad/jerarquía vigente |
+
+`NivelRiesgo` concentra la correspondencia entre nivel, decisión y estado de transacción. El texto, icono y color que se entregan a la interfaz son responsabilidad de `EvaluacionResponseMapper`.
+
+## 5. Thymeleaf y JavaScript: reparto actual
+
+Se mantiene esta combinación; no hay una migración a HTML estático en curso.
+
+| Pantalla | Datos iniciales del servidor | JavaScript |
+| --- | --- | --- |
+| Dashboard | Resumen financiero y movimientos | Gráfico, cambio de periodo y actualización de cifras |
+| Transacciones | Rol, navegación y estructura | Lista, KPIs, filtros locales, detalle y acciones |
+| Usuarios | Usuario actual, rol y estructura | CRUD completo por API |
+| Reglas | Catálogo activo | Utilidades de sesión compartidas |
+| Simulador | Clientes y promedios del selector | Envío, radar de factores y tráfico automático |
+| Reportes | Resultado filtrado y resumen | Construcción de enlaces de exportación |
+| Operación | Cliente, cuenta, saldo, historial y avisos propios | Envío y actualización del recibo, saldo e historial |
+| Login | Formulario y error de acceso | El envío es un formulario procesado por Spring Security |
+
+`fragments/head.html` comparte dependencias y etiquetas CSRF; `fragments/navbar.html` comparte navegación y formulario POST de logout. `auth.js` concentra transporte, notificaciones, CSRF y utilidades `LSUi`.
+
+## 6. Seguridad antes de MVC
+
+`SecurityConfig` configura la cadena de Spring Security. Los controles personalizados tienen este orden relativo:
+
+```text
+contexto de seguridad de sesión
+  → RequestRateLimitFilter
+  → SessionValidationFilter
+  → validación CSRF
+  → autenticación de formulario / logout, según la solicitud
+  → autorización
+  → controlador
+```
+
+Este esquema resume responsabilidades; Spring añade otros filtros de cabeceras, firewall y tratamiento de excepciones. Ya no se usa `AuthInterceptor` ni `WebConfig` para proteger rutas.
+
+La sesión contiene una identidad autenticada; las etiquetas de usuario/rol/cliente se regeneran con datos de la base. Las reglas completas y los límites se documentan en [seguridad](06_SEGURIDAD.md).
+
+## 7. Persistencia y transacciones
+
+- Runtime: PostgreSQL y `ddl-auto=validate`.
+- Pruebas: H2 en modo PostgreSQL y `create-drop`.
+- `open-in-view=false`: la carga necesaria se realiza durante los servicios.
+- Importes: `BigDecimal` en persistencia, comandos y respuestas. El scoring relativo y los porcentajes utilizan también `double`.
+- Crear una evaluación ocurre dentro de una transacción; un error revierte las escrituras de esa operación.
+- La cuenta principal se bloquea para escribir. Desactivar/reactivar bloquea primero la evaluación y después la cuenta.
+- No hay un libro mayor de movimientos separado ni una integración con compensación bancaria.
+
+Los detalles de consultas y límites de concurrencia están en [datos y JPA](04_CONSULTAS_JPA.md).
+
+## 8. Inicialización y configuración
+
+`DataInitializer` solo se activa con `app.demo.enabled=true`, enlazado a `DEMO_DATA_ENABLED`. Coordina roles, clientes/cuentas/dispositivos, catálogos, reglas, usuarios y evaluaciones de ejemplo.
+
+Los sembradores intentan evitar duplicados mediante búsquedas previas. No son un gestor de migraciones ni un mecanismo seguro de aprovisionamiento productivo. Mantener la carga demo activa puede volver a crear elementos ausentes o reponer asignaciones demo al reiniciar.
+
+El motor recibe las implementaciones `ReglaEvaluable` desde `FraudRuleConfiguration`. El catálogo de BD controla activación y pesos; las dos piezas deben mantener identidades compatibles.
+
+## 9. Cómo extender sin romper contratos
+
+### Añadir una regla
+
+1. Implementar `ReglaEvaluable` y probar sus límites.
+2. Registrar su identidad estable en `FactorRegla` y su bean en `FraudRuleConfiguration`.
+3. Provisionar el catálogo y su peso/versión; actualizar fixtures cuando corresponda.
+4. Revisar identificación del modelo, documentación y visualizaciones que dependan de las reglas.
+5. Ejecutar pruebas de dominio, consistencia y arquitectura.
+
+Una implementación nueva sin catálogo no queda aceptada silenciosamente. No basta con añadir una clase.
+
+### Añadir un endpoint
+
+1. Definir DTO, validaciones y caso de uso.
+2. Crear el controlador en presentación.
+3. Autorizar explícitamente ruta y método en `AuthorizationPolicy` o en la configuración si es una excepción justificada.
+4. Conservar CSRF en escrituras y probar acceso por cada rol.
+5. Documentar la respuesta, los errores y sus efectos en persistencia.
+
+### Añadir una pantalla
+
+Reutilizar Thymeleaf, los fragmentos y `auth.js`. Los datos privados se obtienen desde un caso de uso o API autorizada; ocultar controles en la vista no concede ni retira permisos.

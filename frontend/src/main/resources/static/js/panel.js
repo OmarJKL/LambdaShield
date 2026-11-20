@@ -99,9 +99,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (elSaldo) elSaldo.textContent = 'S/ ' + data.saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             if (elSaldoDelta) elSaldoDelta.textContent = (data.variacionSaldo >= 0 ? '+' : '') + data.variacionSaldo + '% este periodo';
-            if (elIngresos) elIngresos.textContent = 'S/ ' + Math.round(data.ingresos).toLocaleString('en-US');
+            if (elIngresos) elIngresos.textContent = 'S/ ' + LSUi.moneda(data.ingresos);
             if (elIngresosDelta) elIngresosDelta.textContent = (data.variacionIngresos >= 0 ? '+' : '') + data.variacionIngresos + '%';
-            if (elEgresos) elEgresos.textContent = 'S/ ' + Math.round(data.egresos).toLocaleString('en-US');
+            if (elEgresos) elEgresos.textContent = 'S/ ' + LSUi.moneda(data.egresos);
             if (elEgresosDelta) elEgresosDelta.textContent = (data.variacionEgresos >= 0 ? '+' : '') + data.variacionEgresos + '%';
         } catch (err) {
             console.error("Error al actualizar resumen:", err);
@@ -133,7 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 const tdMonto = document.createElement('td');
                 tdMonto.className = 'text-end ' + (mov.esIngreso ? 'lambda-amount--positive' : 'lambda-amount--negative');
-                tdMonto.textContent = `${mov.esIngreso ? '+ ' : '- '}S/ ${Number(mov.monto).toLocaleString('es-PE')}`;
+                tdMonto.textContent = `${mov.esIngreso ? '+ ' : '- '}S/ ${LSUi.moneda(mov.monto)}`;
 
                 tr.append(tdFecha, tdDescripcion, tdTipo, tdMonto);
                 return tr;

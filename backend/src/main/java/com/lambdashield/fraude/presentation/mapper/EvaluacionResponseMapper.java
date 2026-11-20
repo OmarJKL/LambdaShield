@@ -6,10 +6,9 @@ import com.lambdashield.fraude.application.model.KpisResultado;
 import com.lambdashield.fraude.presentation.dto.response.EvaluacionResponse;
 import com.lambdashield.fraude.presentation.dto.response.FactorResponse;
 import com.lambdashield.fraude.presentation.dto.response.KpisResponse;
-import org.springframework.stereotype.Component;
-
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import org.springframework.stereotype.Component;
 
 /** Traduce los resultados de aplicación a los DTO HTTP, incluidas las etiquetas visuales. */
 @Component
@@ -36,7 +35,8 @@ public class EvaluacionResponseMapper {
                 resultado.fechaEvaluacion(),
                 resultado.factores().stream().map(this::toFactor).toList(),
                 resultado.idInterno(),
-                resultado.activa()
+                resultado.activa(),
+                resultado.saldoDisponible()
         );
     }
 

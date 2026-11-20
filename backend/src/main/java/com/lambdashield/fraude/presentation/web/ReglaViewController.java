@@ -24,7 +24,7 @@ public class ReglaViewController {
 
     @GetMapping("/reglas")
     public String reglas(HttpSession session, Model model) {
-        model.addAttribute("reglas", reglaService.listar().stream().map(mapper::toResponse).toList());
+        model.addAttribute("reglas", reglaService.listarTodas().stream().map(mapper::toResponse).toList());
         model.addAttribute("nombreUsuario", session.getAttribute("nombreUsuario"));
         return "reglas";
     }

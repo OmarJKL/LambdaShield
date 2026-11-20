@@ -20,27 +20,21 @@
     let filtroMonto = null;
     let filtroFecha = null;
 
-    function getNivelLabel(nivel) {
-        return nivel === 'bajo' ? 'Bajo' : nivel === 'medio' ? 'Medio' : nivel === 'alto' ? 'Alto' : 'Crítico';
-    }
+    const getNivelLabel = LSUi.nivel;
 
-    function escapeHtml(texto) {
-        const span = document.createElement('span');
-        span.textContent = texto == null ? '' : String(texto);
-        return span.innerHTML;
-    }
+    const escapeHtml = LSUi.escapeHtml;
 
     function fechaDe(tx) {
         return tx.fechaHora ? new Date(tx.fechaHora) : null;
     }
 
     async function cargar() {
-        const [resTx, resKpi] = await Promise.all([
-            LSApi.fetch('/api/v1/evaluation?activas=false'),
-            LSApi.fetch('/api/v1/metric')
+        const [datosTx, datosKpi] = await Promise.all([
+            LSApi.json('/api/v1/evaluation?activas=false'),
+            LSApi.json('/api/v1/metric')
         ]);
-        transacciones = await resTx.json();
-        pintarKpis(await resKpi.json());
+        transacciones = datosTx;
+        pintarKpis(datosKpi);
         renderizarLista();
     }
 
@@ -115,7 +109,7 @@
                 <td class="dato-mono">${String(tx.hora).padStart(2, '0')}:00</td>
                 <td class="dato-mono fw-bold" style="color:${tx.colorNivel};">${tx.puntaje}</td>
                 <td>
-                    <span class="etiqueta-nivel" style="background-color:${tx.colorNivel}22; color:${tx.colorNivel}; border: 1px solid ${tx.colorNivel};">
+                    <span class="etiqueta-nivel ${LSUi.claseNivel(tx.nivel)}">
                         ${getNivelLabel(tx.nivel)}
                     </span>
                 </td>
@@ -170,6 +164,7 @@
                 bootstrap.Modal.getOrCreateInstance(modal).hide();
                 await cargar();
             } catch (e) {
+                LSApi.reportarError(e);
                 nuevo.disabled = false;
             }
         });
@@ -180,13 +175,9 @@
     function confirmarDesactivar(tx) {
         pedirConfirmacion(
             'Desactivar operación',
-            `La operación ${tx.id} de ${tx.clienteNombre} se marcará como inactiva (es_activa = false) y su transacción pasará a REVERSADA.`,
+            `Se desactivará la operación ${tx.id} de ${tx.clienteNombre}. Si movió dinero, el movimiento se revertirá.`,
             async () => {
-                const res = await LSApi.fetch(`/api/v1/evaluation/${tx.idInterno}`, { method: 'PATCH' });
-                if (!res.ok && res.status !== 204) {
-                    LSApi.mostrarAviso('No se pudo desactivar la operación.');
-                    throw new Error('desactivar');
-                }
+                await LSApi.json(`/api/v1/evaluation/${tx.idInterno}`, { method: 'PATCH' });
                 LSApi.mostrarAviso(`Operación ${tx.id} desactivada.`);
             });
     }
@@ -196,11 +187,7 @@
             'Reactivar operación',
             `La operación ${tx.id} de ${tx.clienteNombre} volverá a estar activa y su transacción recuperará su estado según el nivel de riesgo.`,
             async () => {
-                const res = await LSApi.fetch(`/api/v1/evaluation/${tx.idInterno}/activar`, { method: 'PATCH' });
-                if (!res.ok && res.status !== 204) {
-                    LSApi.mostrarAviso('No se pudo reactivar la operación.');
-                    throw new Error('reactivar');
-                }
+                await LSApi.json(`/api/v1/evaluation/${tx.idInterno}/activar`, { method: 'PATCH' });
                 LSApi.mostrarAviso(`Operación ${tx.id} reactivada.`);
             });
     }
@@ -217,7 +204,7 @@
 
         const detalleEstado = document.getElementById('detalleEstado');
         if (!tx.activa) {
-            detalleEstado.textContent = 'Desactivada: la evaluación fue dada de baja (es_activa = false).';
+            detalleEstado.textContent = 'Desactivada: la operación fue dada de baja.';
         } else if (tx.nivel === 'bajo') {
             detalleEstado.textContent = 'Aprobada: no presenta riesgo significativo.';
         } else if (tx.nivel === 'medio') {
@@ -308,7 +295,5 @@
         renderizarLista();
     });
 
-    cargar().catch(() => {
-        LSApi.mostrarAviso('No se pudo cargar el historial de operaciones.');
-    });
+    cargar().catch(LSApi.reportarError);
 })();

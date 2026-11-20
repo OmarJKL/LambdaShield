@@ -19,6 +19,14 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Pruebas del frontend
+        run: node --test frontend/tests/*.test.cjs
+
       - name: Pruebas y cobertura
         run: sh ./mvnw -B test
 

@@ -9,15 +9,7 @@
     let editandoId = null;
     let eliminandoId = null;
 
-    function escapeHtml(texto) {
-        const span = document.createElement('span');
-        span.textContent = texto == null ? '' : String(texto);
-        return span.innerHTML;
-    }
-
-    function claseEstado(estado) {
-        return estado === 'ACTIVO' ? 'etiqueta-nivel' : 'etiqueta-nivel';
-    }
+    const escapeHtml = LSUi.escapeHtml;
 
     function colorEstado(estado) {
         if (estado === 'ACTIVO') return 'var(--riesgo-bajo)';
@@ -25,22 +17,8 @@
         return 'var(--texto-secundario)';
     }
 
-    async function mostrarError(res) {
-        let mensaje = 'No se pudo completar la operación.';
-        try {
-            const data = await res.json();
-            if (data && data.errores && data.errores.length) mensaje = data.errores[0];
-            else if (data && data.error) mensaje = data.error;
-        } catch (e) {
-            // Respuesta sin cuerpo JSON: se conserva el mensaje genérico.
-        }
-        LSApi.mostrarAviso(mensaje);
-    }
-
     async function cargar() {
-        const res = await LSApi.fetch('/api/v1/user');
-        if (!res.ok) return mostrarError(res);
-        usuarios = await res.json();
+        usuarios = await LSApi.json('/api/v1/user');
         renderizar();
     }
 
@@ -52,7 +30,7 @@
             const tr = document.createElement('tr');
             if (u.usuario === usuarioActual) tr.classList.add('table-light');
 
-            const estadoHtml = `<span class="${claseEstado(u.estado)}"
+            const estadoHtml = `<span class="etiqueta-nivel"
                 style="color:${colorEstado(u.estado)}; border:1px solid ${colorEstado(u.estado)};">${escapeHtml(u.estado)}</span>`;
 
             tr.innerHTML = `
@@ -127,7 +105,7 @@
 
     document.getElementById('btnNuevoUsuario').addEventListener('click', abrirCreacion);
 
-    document.getElementById('formUsuario').addEventListener('submit', async (e) => {
+    LSApi.escucharAccion(document.getElementById('formUsuario'), 'submit', async (e) => {
         e.preventDefault();
         const payload = {
             nombres: document.getElementById('usuarioNombres').value,
@@ -137,8 +115,8 @@
             codigoCliente: document.getElementById('usuarioCodigoCliente').value || null
         };
 
-        const res = editandoId === null
-            ? await LSApi.fetch('/api/v1/user', {
+        await (editandoId === null
+            ? LSApi.json('/api/v1/user', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -147,40 +125,34 @@
                     ...payload
                 })
             })
-            : await LSApi.fetch('/api/v1/user/' + editandoId, {
+            : LSApi.json('/api/v1/user/' + editandoId, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
-            });
+            }));
 
-        if (!res.ok) return mostrarError(res);
         LSApi.mostrarAviso(editandoId === null ? 'Usuario creado.' : 'Usuario actualizado.');
         modal('usuarioModal').hide();
         await cargar();
     });
 
-    document.getElementById('formClave').addEventListener('submit', async (e) => {
+    LSApi.escucharAccion(document.getElementById('formClave'), 'submit', async (e) => {
         e.preventDefault();
-        const res = await LSApi.fetch('/api/v1/user/' + editandoId + '/clave', {
+        await LSApi.json('/api/v1/user/' + editandoId + '/clave', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ clave: document.getElementById('claveNueva').value })
         });
-        if (!res.ok) return mostrarError(res);
         LSApi.mostrarAviso('Clave actualizada.');
         modal('claveModal').hide();
     });
 
-    document.getElementById('btnConfirmarEliminar').addEventListener('click', async () => {
-        const res = await LSApi.fetch('/api/v1/user/' + eliminandoId, { method: 'DELETE' });
-        if (!res.ok) {
-            modal('eliminarModal').hide();
-            return mostrarError(res);
-        }
+    LSApi.escucharAccion(document.getElementById('btnConfirmarEliminar'), 'click', async () => {
+        await LSApi.json('/api/v1/user/' + eliminandoId, { method: 'DELETE' });
         LSApi.mostrarAviso('Usuario eliminado.');
         modal('eliminarModal').hide();
         await cargar();
     });
 
-    cargar().catch(() => LSApi.mostrarAviso('No se pudo cargar la lista de usuarios.'));
+    cargar().catch(LSApi.reportarError);
 })();

@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,19 +52,18 @@ class ValidacionApiMockMvcTest {
             """;
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
-    private static MockHttpSession admin() {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-admin");
-        session.setAttribute("nombreUsuario", "Usuario ADMIN");
-        session.setAttribute("rol", "ADMIN");
-        return session;
+    private MockHttpSession admin() {
+        return SesionesPrueba.crear(authService, "ADMIN");
     }
 
     @Test
     void requestValidoSigueAceptandose() throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(JSON_VALIDO))
@@ -101,7 +104,7 @@ class ValidacionApiMockMvcTest {
 
     @Test
     void jsonMalformadoDevuelve400NoRompeElServidor() throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"cliente\": "))
@@ -111,7 +114,7 @@ class ValidacionApiMockMvcTest {
 
     @Test
     void cuerpoVacioDevuelve400() throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
@@ -120,7 +123,7 @@ class ValidacionApiMockMvcTest {
 
     @Test
     void contentTypeNoSoportadoDevuelve415() throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.TEXT_PLAIN)
                         .content(JSON_VALIDO))
@@ -130,15 +133,15 @@ class ValidacionApiMockMvcTest {
     }
 
     @Test
-    void idNoNumericoEnPatchDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", "abc").session(admin()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errores[0]").value("El parámetro 'id' tiene un valor inválido"));
+    void idNoNumericoSeRechazaAntesDelControlador() throws Exception {
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", "abc").with(SesionesPrueba.csrf()).session(admin()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("No autorizado"));
     }
 
     @Test
     void idNoPositivoEnPatchDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", "0").session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", "0").with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value(ID_POSITIVO));
     }
@@ -156,7 +159,7 @@ class ValidacionApiMockMvcTest {
 
     @Test
     void idNoPositivoEnReactivarDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", "0").session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", "0").with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value(ID_POSITIVO));
     }
@@ -175,7 +178,7 @@ class ValidacionApiMockMvcTest {
     }
 
     private void assertCampoInvalido(String json, String mensaje) throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(admin())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))

@@ -21,18 +21,18 @@ class AuthorizationPolicyTest {
         assertThat(policy.rechazoApi("ANALISTA", "PATCH", "/api/v1/evaluation/1"))
                 .contains("No autorizado");
         assertThat(policy.rechazoApi("ADMIN", "DELETE", "/api/v1/evaluation/1"))
-                .contains("DELETE no permitido; use PATCH para desactivar");
+                .contains("No autorizado");
     }
 
     @Test
     void adminPuedeBorrarUsuariosPeroNoEvaluaciones() {
         assertThat(policy.rechazoApi("ADMIN", "DELETE", "/api/v1/user/1")).isEmpty();
         assertThat(policy.rechazoApi("ADMIN", "DELETE", "/api/v1/evaluation/1"))
-                .contains("DELETE no permitido; use PATCH para desactivar");
+                .contains("No autorizado");
         assertThat(policy.rechazoApi("ANALISTA", "DELETE", "/api/v1/user/1"))
-                .contains("DELETE no permitido; use PATCH para desactivar");
+                .contains("No autorizado");
         assertThat(policy.rechazoApi("CLIENTE", "DELETE", "/api/v1/user/1"))
-                .contains("DELETE no permitido; use PATCH para desactivar");
+                .contains("No autorizado");
     }
 
     @Test

@@ -1,12 +1,11 @@
 package com.lambdashield.fraude.config.seed;
 
-import com.lambdashield.fraude.domain.entity.EvaluacionFraude;
 import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
-import com.lambdashield.fraude.repository.EvaluacionFraudeRepository;
 import com.lambdashield.fraude.application.service.EvaluacionTransaccionService;
-import org.springframework.stereotype.Component;
-
+import com.lambdashield.fraude.repository.EvaluacionFraudeRepository;
+import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.stereotype.Component;
 
 /** Genera transacciones iniciales solo en bases vacías, reutilizando el caso de uso real. */
 @Component
@@ -42,7 +41,7 @@ public class EvaluacionDemoSeeder {
         if (evaluacionRepository.count() > 0) return;
         for (DemoTransaccion demo : DEMOS) {
             evaluacionTransaccionService.crearYEvaluar(new EvaluarTransaccionCommand(
-                    demo.cliente(), demo.monto(), demo.categoria(), demo.hora(), demo.pais(),
+                    demo.cliente(), BigDecimal.valueOf(demo.monto()), demo.categoria(), demo.hora(), demo.pais(),
                     demo.dispositivo(), demo.operaciones(), demo.beneficiario(), demo.ip(),
                     null));
         }

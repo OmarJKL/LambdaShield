@@ -7,7 +7,7 @@ import lombok.*;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "beneficiario")
+@Table(name = "beneficiario", uniqueConstraints = @UniqueConstraint(name = "uq_beneficiario_cliente_cuenta", columnNames = {"id_cliente", "numero_cuenta_destino"}))
 @Getter
 @Setter
 @NoArgsConstructor

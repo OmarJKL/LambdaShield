@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.web;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,15 +26,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OperacionClienteViewMockMvcTest {
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
     private MockMvc mockMvc;
 
     @Test
     void operacionNoMuestraTransaccionesDeOtrosClientes() throws Exception {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "usuario");
-        session.setAttribute("nombreUsuario", "María Fernández (Cliente)");
-        session.setAttribute("rol", "CLIENTE");
-        session.setAttribute("codigoCliente", "C-001");
+        MockHttpSession session = SesionesPrueba.crear(authService, "CLIENTE");
 
         MvcResult result = mockMvc.perform(get("/operacion").session(session))
                 .andExpect(status().isOk())

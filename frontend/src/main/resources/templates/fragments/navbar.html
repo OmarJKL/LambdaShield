@@ -5,7 +5,31 @@
         <a class="navbar-brand fw-bold" th:href="${session.rol == 'CLIENTE'} ? @{/operacion} : @{/}">
             <i class="bi bi-shield-lock-fill text-danger"></i> LAMBDA SHIELD
         </a>
-        <div class="collapse navbar-collapse">
+        <div th:if="${session.rol == 'CLIENTE'}" class="dropdown ms-auto me-2 order-lg-3 notificaciones" id="centroNotificaciones">
+            <button class="boton-campana" type="button" id="btnNotificaciones" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" aria-expanded="false" aria-controls="panelNotificaciones" aria-label="Notificaciones">
+                <i class="bi bi-bell" aria-hidden="true"></i>
+                <span class="contador-notificaciones" id="contadorNotificaciones" hidden aria-hidden="true">0</span>
+            </button>
+            <section class="dropdown-menu dropdown-menu-end panel-notificaciones" id="panelNotificaciones" aria-labelledby="btnNotificaciones">
+                <div class="notificaciones-cabecera">
+                    <div><h2>Notificaciones</h2><p id="resumenNotificaciones" role="status" aria-live="polite">Tus avisos de seguridad</p></div>
+                    <button type="button" class="notificaciones-marcar" id="btnLeerNotificaciones" disabled title="Marcar todas como leídas" aria-label="Marcar todas como leídas">
+                        <i class="bi bi-check2-all" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="notificaciones-lista" id="listaNotificaciones" aria-live="polite">
+                    <p class="notificaciones-vacio">Cargando tus notificaciones…</p>
+                </div>
+                <button type="button" class="notificaciones-mas" id="btnMasNotificaciones" hidden>Ver anteriores</button>
+                <div class="notificaciones-pie" id="estadoNotificaciones">Solo tú puedes ver estos avisos.</div>
+            </section>
+        </div>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContenido"
+                aria-controls="navbarContenido" aria-expanded="false" aria-label="Abrir navegación">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse order-lg-2" id="navbarContenido">
             <ul class="navbar-nav me-auto ms-4">
                 <!-- Enlaces para el Administrador / Analista -->
                 <th:block th:if="${session.rol != 'CLIENTE'}">
@@ -50,9 +74,11 @@
                           th:text="${session.rol == 'CLIENTE' ? 'Cliente' : (session.rol == 'ANALISTA' ? 'Analista' : 'Administrador')}">Admin</span>
                     <span th:text="${session.nombreUsuario}">Usuario</span>
                 </span>
-                <a th:href="@{/logout}" class="btn btn-secundario btn-sm" id="btnCerrarSesion">
+                <form th:action="@{/logout}" method="post" class="m-0">
+                <button type="submit" class="btn btn-secundario btn-sm" id="btnCerrarSesion">
                     <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
-                </a>
+                </button>
+                </form>
             </div>
         </div>
     </nav>

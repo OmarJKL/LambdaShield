@@ -34,6 +34,18 @@ import java.util.Objects;
  */
 @ControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(com.lambdashield.fraude.application.service.ReglaNoEncontradaException.class)
+    public ResponseEntity<Map<String, List<String>>> handleReglaNoEncontrada(
+            com.lambdashield.fraude.application.service.ReglaNoEncontradaException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("errores", List.of(ex.getMessage())));
+    }
+
+    @ExceptionHandler(com.lambdashield.fraude.application.service.AsistenteReglasException.class)
+    public ResponseEntity<Map<String, List<String>>> handleAsistente(
+            com.lambdashield.fraude.application.service.AsistenteReglasException ex) {
+        return ResponseEntity.status(ex.noDisponible() ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY)
+                .body(Map.of("errores", List.of(ex.getMessage())));
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, List<String>>> handleValidation(MethodArgumentNotValidException ex) {
@@ -61,6 +73,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, List<String>>> handleEvaluacionNoEncontrada(EvaluacionNoEncontradaException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("errores", List.of(mensajeSeguro(ex))));
+    }
+
+    @ExceptionHandler(com.lambdashield.fraude.application.service.NotificacionNoEncontradaException.class)
+    public ResponseEntity<Map<String, List<String>>> handleNotificacionNoEncontrada(Exception ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("errores", List.of("Notificación no encontrada")));
     }
 
     @ExceptionHandler(UsuarioNoEncontradoException.class)

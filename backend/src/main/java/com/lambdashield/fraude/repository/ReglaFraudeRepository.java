@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ReglaFraudeRepository extends JpaRepository<ReglaFraude, Integer> {
-    List<ReglaFraude> findByEsActivaTrue();
     List<ReglaFraude> findByEsActivaTrueOrderByCodigoReglaAsc();
+    List<ReglaFraude> findAllByOrderByCodigoReglaAsc();
     Optional<ReglaFraude> findByCodigoRegla(String codigoRegla);
 }

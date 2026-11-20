@@ -1,20 +1,6 @@
 (() => {
     'use strict';
 
-    const NIVEL_META = {
-        bajo:     { etiqueta: 'Bajo',     color: 'var(--riesgo-bajo)' },
-        medio:    { etiqueta: 'Medio',    color: 'var(--riesgo-medio)' },
-        alto:     { etiqueta: 'Alto',     color: 'var(--riesgo-alto)' },
-        critico:  { etiqueta: 'Crítico',  color: 'var(--riesgo-critico)' },
-    };
-
-    const ESTADO_POR_NIVEL = {
-        bajo:    { texto: 'Aprobada',        icono: 'bi-check-circle-fill', color: 'var(--riesgo-bajo)' },
-        medio:   { texto: 'Monitoreo',       icono: 'bi-eye-fill',          color: 'var(--riesgo-medio)' },
-        alto:    { texto: 'Retener / Alertar', icono: 'bi-flag-fill',         color: 'var(--riesgo-alto)' },
-        critico: { texto: 'Bloqueada',       icono: 'bi-x-octagon-fill',    color: 'var(--riesgo-critico)' },
-    };
-
     const $ = (sel) => document.querySelector(sel);
     const form            = $('#formTransaccion');
     const resultadoVacio  = $('#resultadoVacio');
@@ -37,7 +23,7 @@
             hora: Number(hh),
             pais: $('#trPais').value,
             dispositivo: $('#trDispositivo').value,
-            operacionesUltimaHora: Number($('#trVelocidad').value) || 1,
+            operacionesUltimaHora: Number($('#trVelocidad').value),
             beneficiario: $('#trBeneficiario').value,
             ip: $('#trIp').value,
         };
@@ -45,14 +31,12 @@
 
     async function enviarYEvaluar(datos) {
         try {
-            const res = await LSApi.fetch('/api/v1/evaluation', {
+            const resultado = await LSApi.json('/api/v1/evaluation', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(datos)
             });
 
-            if (!res.ok) throw new Error('Error en el servidor: ' + res.status);
-            const resultado = await res.json();
             pintarResultado(resultado);
 
             if (resultado.nivel === 'critico') {
@@ -60,7 +44,7 @@
             }
             return resultado;
         } catch (error) {
-            console.error('Error al evaluar transacción:', error);
+            LSApi.reportarError(error);
         }
     }
 
@@ -70,23 +54,20 @@
         resultadoLleno.classList.remove('d-none');
 
         const { puntaje, nivel, factores, id } = registro;
-        const meta = NIVEL_META[nivel] || NIVEL_META.bajo;
-        const desc = ESTADO_POR_NIVEL[nivel] || ESTADO_POR_NIVEL.bajo;
+
 
         anilloPuntaje.style.setProperty('--p', `${(puntaje / 100) * 360}deg`);
-        anilloPuntaje.style.setProperty('--c', meta.color);
+        anilloPuntaje.style.setProperty('--c', registro.colorNivel);
         numeroPuntaje.textContent = puntaje;
 
-        insigniaNivel.textContent = `Riesgo ${meta.etiqueta}`;
-        insigniaNivel.style.backgroundColor = `${meta.color}22`;
-        insigniaNivel.style.color = meta.color;
-        insigniaNivel.style.border = `1px solid ${meta.color}`;
+        insigniaNivel.textContent = `Riesgo ${LSUi.nivel(nivel)}`;
+        insigniaNivel.className = `etiqueta-nivel ${LSUi.claseNivel(nivel)}`;
 
         textoVeredicto.replaceChildren();
         const iconoVeredicto = document.createElement('i');
-        iconoVeredicto.className = `bi ${desc.icono}`;
-        iconoVeredicto.style.color = desc.color;
-        textoVeredicto.append(iconoVeredicto, document.createTextNode(` ${desc.texto} · ${id}`));
+        iconoVeredicto.className = `bi ${registro.iconoEstado}`;
+        iconoVeredicto.style.color = registro.colorNivel;
+        textoVeredicto.append(iconoVeredicto, document.createTextNode(` ${registro.estado} · ${id}`));
 
         contenedorRadar.replaceChildren(construirRadarSVG(factores));
         listaFactores.replaceChildren(...factores.map(construirFactorElemento));
@@ -207,35 +188,7 @@
     }
 
     function lanzarAlerta(registro) {
-        let contenedor = document.querySelector('.contenedor-alertas');
-        if (!contenedor) {
-            contenedor = document.createElement('div');
-            contenedor.className = 'contenedor-alertas position-fixed';
-            document.body.appendChild(contenedor);
-        }
-
-        const div = document.createElement('div');
-        div.className = 'alerta-ls';
-
-        const titulo = document.createElement('strong');
-        titulo.className = 'd-block mb-1 text-danger';
-        titulo.style.fontSize = '0.9rem';
-        const icono = document.createElement('i');
-        icono.className = 'bi bi-shield-x';
-        titulo.append(icono, document.createTextNode(' Transacción Bloqueada'));
-
-        const detalle = document.createElement('span');
-        detalle.className = 'text-secondary small';
-        detalle.textContent = `${registro.id} · ${registro.clienteNombre} · S/ ${Number(registro.monto).toFixed(2)} · Score: ${registro.puntaje}`;
-
-        div.append(titulo, detalle);
-        contenedor.appendChild(div);
-
-        setTimeout(() => {
-            div.style.opacity = '0';
-            div.style.transition = 'opacity 0.4s ease';
-            setTimeout(() => div.remove(), 400);
-        }, 5000);
+        LSApi.mostrarAviso(`Transacción bloqueada: ${registro.id} · ${registro.clienteNombre} · S/ ${LSUi.moneda(registro.monto)} · Puntaje: ${registro.puntaje}`);
     }
 
     function generarTransaccionAleatoria() {

@@ -1,16 +1,15 @@
 package com.lambdashield.fraude.application.service;
 
+import com.lambdashield.fraude.domain.customer.NombreClienteFormatter;
 import com.lambdashield.fraude.domain.entity.Cliente;
 import com.lambdashield.fraude.domain.entity.Cuenta;
-import com.lambdashield.fraude.domain.customer.NombreClienteFormatter;
 import com.lambdashield.fraude.repository.ClienteRepository;
 import com.lambdashield.fraude.repository.CuentaRepository;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Acceso a los datos de clientes que necesita la aplicación.
@@ -24,9 +23,9 @@ public class ClienteService {
     public record ClienteInfo(
             String codigo,
             String nombre,
-            double promedioGasto,
+            BigDecimal promedioGasto,
             String numeroCuenta,
-            double saldo
+            BigDecimal saldo
     ) {}
 
     private final ClienteRepository clienteRepository;
@@ -56,15 +55,16 @@ public class ClienteService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public Cuenta obtenerCuentaPrincipal(Cliente cliente) {
         return cuentaRepository.findFirstByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente())
+                .filter(c -> c.getEstadoCuenta() == com.lambdashield.fraude.domain.enums.EstadoCuenta.ACTIVA)
                 .orElseThrow(() -> new IllegalStateException(
                         "El cliente " + cliente.getCodigoCliente() + " no tiene una cuenta registrada"));
     }
 
     private ClienteInfo toInfo(Cliente cliente) {
-        Cuenta cuenta = cuentaRepository.findFirstByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente())
+        Cuenta cuenta = cuentaRepository.findTopByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente())
                 .orElse(null);
         BigDecimal promedio = cliente.getPromedioGasto() != null
                 ? cliente.getPromedioGasto()
@@ -72,11 +72,11 @@ public class ClienteService {
         return new ClienteInfo(
                 cliente.getCodigoCliente(),
                 NombreClienteFormatter.nombreCompleto(cliente),
-                promedio.doubleValue(),
+                promedio,
                 cuenta != null ? cuenta.getNumeroCuenta() : "",
                 cuenta != null && cuenta.getSaldoDisponible() != null
-                        ? cuenta.getSaldoDisponible().doubleValue()
-                        : 0.0
+                        ? cuenta.getSaldoDisponible()
+                        : BigDecimal.ZERO
         );
     }
 

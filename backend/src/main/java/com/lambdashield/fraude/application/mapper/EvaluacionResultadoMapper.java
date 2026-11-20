@@ -10,10 +10,9 @@ import com.lambdashield.fraude.domain.entity.ReglaFraude;
 import com.lambdashield.fraude.domain.entity.Transaccion;
 import com.lambdashield.fraude.domain.fraud.FactorEvaluado;
 import com.lambdashield.fraude.domain.fraud.FactorRegla;
-import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.Locale;
+import org.springframework.stereotype.Component;
 
 /** Convierte las entidades y resultados del dominio en el modelo de aplicación. */
 @Component
@@ -27,7 +26,7 @@ public class EvaluacionResultadoMapper {
                 String.format("TR-%05d", evaluacion.getIdEvaluacion()),
                 cliente.getCodigoCliente(),
                 NombreClienteFormatter.nombreCompleto(cliente),
-                transaccion.getMontoTransaccion().doubleValue(),
+                transaccion.getMontoTransaccion(),
                 transaccion.getTipoTransaccion().getCodigoTipo(),
                 paisDesdeCodigo(transaccion.getCodigoPais()),
                 transaccion.getFechaHoraTransaccion().getHour(),
@@ -36,7 +35,8 @@ public class EvaluacionResultadoMapper {
                 evaluacion.getFechaEvaluacion().toLocalDateTime(),
                 factores,
                 evaluacion.getIdEvaluacion(),
-                evaluacion.isEsActiva()
+                evaluacion.isEsActiva(),
+                transaccion.getCuenta().getSaldoDisponible()
         );
     }
 
@@ -46,7 +46,8 @@ public class EvaluacionResultadoMapper {
 
     public FactorResultado toFactor(EvaluacionRegla evaluacionRegla) {
         ReglaFraude regla = evaluacionRegla.getRegla();
-        int maximo = regla.getPeso() != null ? regla.getPeso().intValue() : 0;
+        int maximo = evaluacionRegla.getMaximoAplicado() != null
+                ? evaluacionRegla.getMaximoAplicado() : regla.getPeso().intValue();
         int puntaje = evaluacionRegla.getPesoAplicado() != null
                 ? evaluacionRegla.getPesoAplicado().intValue()
                 : 0;
@@ -54,7 +55,7 @@ public class EvaluacionResultadoMapper {
                 FactorRegla.porCodigo(regla.getCodigoRegla())
                         .map(FactorRegla::id)
                         .orElse(regla.getCodigoRegla().toLowerCase(Locale.ROOT)),
-                regla.getNombreRegla(),
+                evaluacionRegla.getEtiquetaAplicada() != null ? evaluacionRegla.getEtiquetaAplicada() : regla.getNombreRegla(),
                 puntaje,
                 maximo,
                 evaluacionRegla.getValorDetectado()

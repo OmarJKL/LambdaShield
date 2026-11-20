@@ -1,5 +1,9 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
+import com.lambdashield.fraude.application.service.AuthService;
+
+import com.lambdashield.fraude.support.SesionesPrueba;
+
 import com.lambdashield.fraude.domain.entity.Beneficiario;
 import com.lambdashield.fraude.domain.entity.Cuenta;
 import com.lambdashield.fraude.repository.BeneficiarioRepository;
@@ -30,6 +34,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class PortalClienteApiMockMvcTest {
+    @Autowired
+    private com.lambdashield.fraude.repository.TipoTransaccionRepository tipos;
+
+    @Autowired
+    private AuthService authService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -40,15 +49,8 @@ class PortalClienteApiMockMvcTest {
     @Autowired
     private BeneficiarioRepository beneficiarioRepository;
 
-    private static MockHttpSession sesion(String rol, String codigoCliente) {
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute("usuario", "prueba-" + rol.toLowerCase());
-        session.setAttribute("nombreUsuario", "Usuario " + rol);
-        session.setAttribute("rol", rol);
-        if (codigoCliente != null) {
-            session.setAttribute("codigoCliente", codigoCliente);
-        }
-        return session;
+    private MockHttpSession sesion(String rol, String codigoCliente) {
+        return SesionesPrueba.crear(authService, rol);
     }
 
     private static String json(String cliente, double monto, String beneficiarioTipo, String beneficiarioNombre) {
@@ -72,7 +74,7 @@ class PortalClienteApiMockMvcTest {
     void tipoDeBeneficiarioSeDerivaDelHistorial() throws Exception {
         Long idCliente = clienteRepository.findByCodigoCliente("C-001").orElseThrow().getIdCliente();
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(sesion("CLIENTE", "C-001"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("C-001", 20, "", "Carlos Mendoza")))
@@ -84,7 +86,7 @@ class PortalClienteApiMockMvcTest {
                 .as("la primera transferencia a un destinatario lo marca como nuevo")
                 .isFalse();
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(sesion("CLIENTE", "C-001"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("C-001", 20, "", "Carlos Mendoza")))
@@ -101,7 +103,7 @@ class PortalClienteApiMockMvcTest {
     void operacionAprobadaDescuentaElSaldoDeLaCuenta() throws Exception {
         BigDecimal saldoAntes = saldoDe("C-001");
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN", null))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("C-001", 1000, "recurrente", "")))
@@ -117,7 +119,7 @@ class PortalClienteApiMockMvcTest {
         BigDecimal saldo = saldoDe("C-001");
         double montoExcesivo = saldo.doubleValue() + 1000;
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN", null))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("C-001", montoExcesivo, "recurrente", "")))
@@ -129,7 +131,7 @@ class PortalClienteApiMockMvcTest {
     void operacionBloqueadaNoDescuentaSaldo() throws Exception {
         BigDecimal saldoAntes = saldoDe("C-002");
 
-        mockMvc.perform(post("/api/v1/evaluation")
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
                         .session(sesion("ADMIN", null))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -150,6 +152,19 @@ class PortalClienteApiMockMvcTest {
                 .andExpect(jsonPath("$.nivel").value("critico"));
 
         assertThat(saldoDe("C-002")).isEqualByComparingTo(saldoAntes);
+    }
+    @Test
+    void clienteNoPuedeAumentarSuSaldoSeleccionandoUnaCategoriaDeAbono() throws Exception {
+        tipos.save(com.lambdashield.fraude.domain.entity.TipoTransaccion.builder().codigoTipo("abono_prueba")
+                .nombreTipo("Abono de prueba").naturaleza(com.lambdashield.fraude.domain.enums.NaturalezaTransaccion.CREDITO)
+                .esActivo(true).build());
+        BigDecimal saldoAntes = saldoDe("C-001");
+        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf()).session(sesion("CLIENTE", "C-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("C-001", 1, "recurrente", "").replace("retail", "abono_prueba")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errores[0]")
+                        .value(org.hamcrest.Matchers.containsString("solo permite operaciones de débito")));
+        assertThat(saldoDe("C-001")).isEqualByComparingTo(saldoAntes);
     }
 
     private BigDecimal saldoDe(String codigoCliente) {

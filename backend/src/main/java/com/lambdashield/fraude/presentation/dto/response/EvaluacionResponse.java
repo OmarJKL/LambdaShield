@@ -1,5 +1,6 @@
 package com.lambdashield.fraude.presentation.dto.response;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -7,7 +8,7 @@ public record EvaluacionResponse(
     String id,
     String clienteCodigo,
     String clienteNombre,
-    double monto,
+    BigDecimal monto,
     String categoria,
     String pais,
     int hora,
@@ -20,5 +21,6 @@ public record EvaluacionResponse(
     LocalDateTime fechaHora,
     List<FactorResponse> factores,
     Long idInterno,
-    boolean activa
+    boolean activa,
+    BigDecimal saldoDisponible
 ) {}

@@ -345,3 +345,46 @@ h1, h2, h3, h4, h5, h6, .navbar-brand {
 @media (max-width: 991.98px) {
     .lambda-stat-grid { grid-template-columns: 1fr; }
 }
+
+/* Estados compartidos por las tablas, el portal y el simulador. */
+.riesgo-bajo { --color-riesgo: var(--riesgo-bajo); }
+.riesgo-medio { --color-riesgo: var(--riesgo-medio); }
+.riesgo-alto { --color-riesgo: var(--riesgo-alto); }
+.riesgo-critico { --color-riesgo: var(--riesgo-critico); }
+.etiqueta-nivel[class*="riesgo-"] {
+    color: var(--color-riesgo);
+    background-color: color-mix(in srgb, var(--color-riesgo) 13%, transparent);
+    border: 1px solid var(--color-riesgo);
+}
+
+/* Centro de notificaciones personal del portal. */
+.boton-campana { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: var(--texto-principal); font-size: 1.3rem; }
+.boton-campana:hover, .boton-campana.show { background: var(--fondo-input); }
+.boton-campana:focus-visible, .notificacion-item:focus-visible { outline: 2px solid var(--utp-rojo); outline-offset: -2px; }
+.contador-notificaciones { position: absolute; top: 2px; right: 0; min-width: 18px; padding: 2px 4px; border: 2px solid var(--fondo-tarjeta, #fff); border-radius: 20px; background: var(--utp-rojo); color: #fff; font-size: .65rem; line-height: 1; font-weight: 700; }
+.panel-notificaciones { width: min(420px, calc(100vw - 24px)); padding: 0; border: 1px solid var(--borde); border-radius: 16px; overflow: hidden; background: var(--fondo-tarjeta, #fff); box-shadow: 0 12px 40px #0002; color: var(--texto-principal); }
+.notificaciones-cabecera { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 14px; border-bottom: 1px solid var(--borde); }
+.notificaciones-cabecera h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.notificaciones-cabecera p { margin: 4px 0 0; color: var(--texto-secundario); font-size: .78rem; }
+.notificaciones-marcar { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--utp-rojo); font-size: 1.35rem; }
+.notificaciones-marcar:hover { background: var(--fondo-input); }
+.notificaciones-marcar:disabled { opacity: .4; }
+.notificaciones-lista { max-height: min(480px, 65vh); overflow-y: auto; overscroll-behavior: contain; }
+.notificacion-item { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 16px 18px; border: 0; border-bottom: 1px solid var(--borde); background: transparent; color: inherit; text-align: left; }
+.notificacion-item:hover { background: var(--fondo-input); }
+.notificacion-item.sin-leer { background: color-mix(in srgb, var(--utp-rojo) 5%, transparent); }
+.notificacion-icono { display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; border-radius: 50%; font-size: 1.15rem; }
+.notificacion-icono.bloqueada { color: var(--riesgo-critico); background: color-mix(in srgb, var(--riesgo-critico) 10%, transparent); }
+.notificacion-icono.retenida { color: var(--riesgo-alto); background: color-mix(in srgb, var(--riesgo-alto) 10%, transparent); }
+.notificacion-contenido { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.notificacion-titulo { font-size: .86rem; }
+.notificacion-mensaje { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--texto-secundario); font-size: .79rem; line-height: 1.5; overflow-wrap: anywhere; }
+.notificacion-item.expandida .notificacion-mensaje { display: block; }
+.notificacion-fecha { color: var(--texto-secundario); font-size: .71rem; }
+.notificacion-punto { flex: 0 0 7px; width: 7px; height: 7px; margin-top: 8px; border-radius: 50%; background: transparent; }
+.sin-leer .notificacion-punto { background: var(--utp-rojo); }
+.notificaciones-vacio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 34px 24px; margin: 0; color: var(--texto-secundario); text-align: center; font-size: .82rem; }
+.notificaciones-vacio i { font-size: 2rem; }
+.notificaciones-vacio strong { color: var(--texto-principal); }
+.notificaciones-pie { padding: 12px 18px; color: var(--texto-secundario); text-align: center; font-size: .7rem; border-top: 1px solid var(--borde); }
+.notificaciones-mas { width: 100%; padding: 12px; border: 0; background: transparent; color: var(--utp-rojo); font-size: .8rem; font-weight: 600; }

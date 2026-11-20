@@ -12,7 +12,55 @@
             <p class="text-secondary small mb-0">Arquitectura de reglas iniciales parametrizadas según especificación técnica. El score final se normaliza en el rango de 0 a 100.</p>
         </div>
 
-        <!-- Tarjetas de las 8 Reglas del Motor -->
+        <section class="tarjeta-ls p-4 mb-4 border-top border-danger border-3" th:if="${session.rol == 'ADMIN'}" id="asistenteReglas">
+            <div class="d-flex flex-wrap justify-content-between gap-2 align-items-start mb-3">
+                <div>
+                    <h4 class="fw-bold mb-1"><i class="bi bi-stars text-danger"></i> Asistente de reglas con IA</h4>
+                    <p class="text-secondary small mb-0">Define las condiciones y solicita una revisión al modelo configurado en OpenRouter.</p>
+                </div>
+                <span class="badge bg-secondary" id="estadoAsistente" role="status">Comprobando conexión…</span>
+            </div>
+            <div class="alert alert-info small">
+                Esta revisión prepara un borrador. Las reglas activas del catálogo siguen evaluando las operaciones.
+                La publicación de nuevas reglas se incorporará con el motor dinámico.
+            </div>
+            <form id="formAsistenteReglas">
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label for="iaNombre" class="form-label">Nombre de la regla</label>
+                        <input id="iaNombre" class="form-control" maxlength="150" placeholder="Monto alto desde un dispositivo nuevo" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="iaPuntos" class="form-label">Puntos de riesgo</label>
+                        <input id="iaPuntos" class="form-control" type="number" min="1" max="100" step="1" value="25" required>
+                    </div>
+                    <div class="col-12">
+                        <label for="iaObjetivo" class="form-label">Objetivo y dudas a revisar (opcional)</label>
+                        <textarea id="iaObjetivo" class="form-control" rows="2" maxlength="1000" placeholder="Describe el patrón y las dudas sobre su definición."></textarea>
+                        <div class="form-text">Solo se enviará este formulario a OpenRouter. No incluyas nombres de clientes, cuentas, claves ni datos personales.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="iaCombinacion" class="form-label">Cuándo se aplica</label>
+                        <select id="iaCombinacion" class="form-select"><option value="TODAS">Cuando se cumplen todas las condiciones</option><option value="CUALQUIERA">Cuando se cumple cualquiera</option></select>
+                    </div>
+                </div>
+                <fieldset class="mt-3">
+                    <legend class="fs-6 fw-bold">Condiciones</legend>
+                    <div id="iaCondiciones" class="d-grid gap-2"></div>
+                    <button id="iaAgregar" type="button" class="btn btn-secundario btn-sm mt-2"><i class="bi bi-plus-lg"></i> Agregar condición</button>
+                    <div class="form-text">Hasta 8 condiciones. El promedio es el gasto promedio guardado del cliente; el país es declarado.</div>
+                </fieldset>
+                <p class="small text-secondary mt-3 mb-2">Las condiciones del formulario son la definición original. Las observaciones de IA no las modifican y los casos sugeridos aún no son pruebas ejecutadas.</p>
+                <button id="iaRevisar" type="submit" class="btn btn-principal" disabled><i class="bi bi-stars"></i> Revisar con IA</button>
+                <button id="iaExportar" type="button" class="btn btn-secundario ms-2" disabled>Descargar borrador</button>
+                <p id="iaMensaje" class="small mt-2 mb-0" role="status" aria-live="polite"></p>
+            </form>
+            <div id="iaResultado" class="mt-4" aria-live="polite" hidden></div>
+        </section>
+
+        <!-- Catálogo vigente -->
+        <p class="small text-secondary">Las reglas inactivas no aportan puntos en las nuevas evaluaciones. Cambiar su estado no modifica el historial.</p>
+        <p id="estadoReglasMensaje" class="small" role="status" aria-live="polite"></p>
         <div class="row g-4 mb-5">
             <div class="col-md-6 col-lg-3" th:each="regla : ${reglas}">
                 <div class="tarjeta-ls h-100 p-4 border-top border-danger border-3">
@@ -21,7 +69,12 @@
                         <span class="dato-mono fs-3 fw-bold text-danger" th:text="${regla.pesoMaximo()} + ' pts'">25 pts</span>
                     </div>
                     <h6 class="fw-bold mb-2" th:text="${regla.nombre()}">Monto Inusual</h6>
-                    <p class="text-secondary small mb-0" th:text="${regla.descripcion()}">Descripción de la regla y condición de disparo.</p>
+                    <p class="text-secondary small mb-3" th:text="${regla.descripcion()}">Descripción de la regla y condición de disparo.</p>
+                    <span data-estado-regla class="badge" th:classappend="${regla.activa()} ? 'bg-success' : 'bg-secondary'"
+                          th:text="${regla.activa()} ? 'Activa' : 'Inactiva'">Activa</span>
+                    <button th:if="${session.rol == 'ADMIN'}" type="button" class="btn btn-secundario btn-sm mt-2 d-block"
+                            data-cambiar-regla th:attr="data-codigo=${regla.codigo()},data-activa=${regla.activa()},aria-label=(${regla.activa()} ? 'Desactivar ' : 'Activar ') + ${regla.nombre()}"
+                            th:text="${regla.activa()} ? 'Desactivar' : 'Activar'">Desactivar</button>
                 </div>
             </div>
         </div>
@@ -50,19 +103,19 @@
                             <td><span class="dato-mono fw-bold">30 – 59</span></td>
                             <td><span class="badge bg-warning text-dark py-1 px-3">MEDIO</span></td>
                             <td><strong style="color: var(--riesgo-medio, #d97706);">MONITOREAR</strong></td>
-                            <td class="small text-secondary">Procesada con registro de auditoría preventiva y telemetría de comportamiento.</td>
+                            <td class="small text-secondary">Procesada y registrada con nivel de riesgo medio para consulta posterior.</td>
                         </tr>
                         <tr>
                             <td><span class="dato-mono fw-bold">60 – 79</span></td>
                             <td><span class="badge py-1 px-3" style="background-color: var(--riesgo-alto, #ea580c); color: white;">ALTO</span></td>
                             <td><strong style="color: var(--riesgo-alto, #ea580c);">RETENER / ALERTAR</strong></td>
-                            <td class="small text-secondary">Operación en pausa temporal; genera alerta prioritaria para revisión del analista.</td>
+                            <td class="small text-secondary">Operación retenida sin descontar saldo; genera un aviso en el portal del usuario.</td>
                         </tr>
                         <tr>
                             <td><span class="dato-mono fw-bold">80 – 100</span></td>
                             <td><span class="badge bg-danger py-1 px-3">CRÍTICO</span></td>
                             <td><strong class="text-danger">BLOQUEAR / ALERTA CRÍTICA</strong></td>
-                            <td class="small text-secondary">Operación detenida inmediatamente por alta probabilidad de compromiso o fraude.</td>
+                            <td class="small text-secondary">Operación detenida por puntaje de riesgo crítico, sin descontar saldo; genera un aviso al usuario.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -76,5 +129,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
     <script th:src="@{/js/auth.js}"></script>
+    <script th:src="@{/js/asistente-reglas.js}"></script>
+    <script th:src="@{/js/reglas.js}"></script>
 </body>
 </html>

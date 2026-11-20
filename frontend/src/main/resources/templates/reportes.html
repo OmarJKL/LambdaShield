@@ -168,7 +168,7 @@
                             <td class="dato-mono fw-bold" th:style="'color:' + ${tx.colorNivel()}" th:text="${tx.puntaje()}">12</td>
                             <td>
                                 <span class="etiqueta-nivel"
-                                      th:style="'background-color:' + ${tx.colorNivel()} + '22; color:' + ${tx.colorNivel()} + '; border: 1px solid ' + ${tx.colorNivel()}"
+                                      th:classappend="'riesgo-' + ${tx.nivel()}"
                                       th:text="${#strings.capitalize(tx.nivel())}">Bajo</span>
                             </td>
                             <td>

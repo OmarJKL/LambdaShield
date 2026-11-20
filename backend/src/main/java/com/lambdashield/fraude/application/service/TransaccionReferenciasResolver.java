@@ -1,23 +1,18 @@
 package com.lambdashield.fraude.application.service;
 
+import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
 import com.lambdashield.fraude.domain.entity.Beneficiario;
 import com.lambdashield.fraude.domain.entity.Canal;
 import com.lambdashield.fraude.domain.entity.Cliente;
 import com.lambdashield.fraude.domain.entity.Dispositivo;
 import com.lambdashield.fraude.domain.entity.TipoTransaccion;
-import com.lambdashield.fraude.domain.device.DeviceFingerprint;
 import com.lambdashield.fraude.domain.enums.NaturalezaTransaccion;
-import com.lambdashield.fraude.domain.enums.TipoDispositivo;
-import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
 import com.lambdashield.fraude.repository.BeneficiarioRepository;
 import com.lambdashield.fraude.repository.CanalRepository;
-import com.lambdashield.fraude.repository.DispositivoRepository;
 import com.lambdashield.fraude.repository.TipoTransaccionRepository;
-import org.springframework.stereotype.Component;
-
 import java.time.OffsetDateTime;
 import java.util.Locale;
-import java.util.UUID;
+import org.springframework.stereotype.Component;
 
 /** Resuelve y crea las entidades de catálogo asociadas a una transacción. */
 @Component
@@ -25,25 +20,29 @@ public class TransaccionReferenciasResolver {
 
     private final TipoTransaccionRepository tipoTransaccionRepository;
     private final CanalRepository canalRepository;
-    private final DispositivoRepository dispositivoRepository;
+    private final DispositivoService dispositivos;
     private final BeneficiarioRepository beneficiarioRepository;
+    private final com.lambdashield.fraude.repository.CuentaRepository cuentas;
 
     public TransaccionReferenciasResolver(TipoTransaccionRepository tipoTransaccionRepository,
                                           CanalRepository canalRepository,
-                                          DispositivoRepository dispositivoRepository,
-                                          BeneficiarioRepository beneficiarioRepository) {
+                                          DispositivoService dispositivos,
+                                          BeneficiarioRepository beneficiarioRepository, com.lambdashield.fraude.repository.CuentaRepository cuentas) {
         this.tipoTransaccionRepository = tipoTransaccionRepository;
         this.canalRepository = canalRepository;
-        this.dispositivoRepository = dispositivoRepository;
+        this.dispositivos = dispositivos;
         this.beneficiarioRepository = beneficiarioRepository;
+        this.cuentas = cuentas;
     }
 
     public Referencias resolver(Cliente cliente, EvaluarTransaccionCommand request, String userAgent) {
         return new Referencias(
                 tipoTransaccion(request.categoria()),
                 canalWeb(),
-                dispositivo(cliente, request.dispositivo(), userAgent),
-                beneficiario(cliente, request.beneficiario(), request.beneficiarioNombre())
+                dispositivos.resolver(cliente, request.dispositivo(), userAgent),
+                request.numeroCuentaDestino() != null && !request.numeroCuentaDestino().isBlank()
+                        ? beneficiarioPorCuenta(cliente, request)
+                        : beneficiario(cliente, request.beneficiario(), request.beneficiarioNombre())
         );
     }
 
@@ -69,41 +68,6 @@ public class TransaccionReferenciasResolver {
                         .build()));
     }
 
-    private Dispositivo dispositivo(Cliente cliente, String tipoSolicitado, String userAgent) {
-        if ("reconocido".equalsIgnoreCase(tipoSolicitado)) {
-            return dispositivoRepository.findByCliente_IdClienteAndEsConocidoTrue(cliente.getIdCliente())
-                    .stream()
-                    .findFirst()
-                    .orElseGet(() -> crearDispositivo(cliente,
-                            DeviceFingerprint.normalize(userAgent), true));
-        }
-        String normalizado = userAgent != null
-                ? DeviceFingerprint.normalize(userAgent)
-                : "Nuevo|Desconocido";
-        return crearDispositivo(cliente, normalizado, false);
-    }
-
-    private Dispositivo crearDispositivo(Cliente cliente, String normalizado, boolean conocido) {
-        String[] partes = normalizado.split("\\|", 2);
-        String navegador = partes.length > 0 ? partes[0] : "Otro";
-        String sistema = partes.length > 1 ? partes[1] : "Otro";
-        TipoDispositivo tipo = "Android".equals(sistema) || "iOS".equals(sistema)
-                ? TipoDispositivo.MOVIL
-                : TipoDispositivo.PC;
-        OffsetDateTime ahora = OffsetDateTime.now();
-        return dispositivoRepository.save(Dispositivo.builder()
-                .cliente(cliente)
-                .huellaDispositivo(DeviceFingerprint.from(cliente.getCodigoCliente(), normalizado)
-                        + "|" + UUID.randomUUID())
-                .tipoDispositivo(tipo)
-                .sistemaOperativo(sistema)
-                .navegador(navegador)
-                .esConocido(conocido)
-                .fechaPrimerUso(ahora)
-                .fechaUltimoUso(ahora)
-                .build());
-    }
-
     /**
      * Resuelve el beneficiario de la operación. Si se conoce su nombre, el tipo
      * (nuevo o recurrente) se deriva del historial real del cliente: la primera
@@ -117,36 +81,71 @@ public class TransaccionReferenciasResolver {
             return beneficiarioRepository
                     .findFirstByCliente_IdClienteAndNombreBeneficiario(cliente.getIdCliente(), nombre)
                     .map(existente -> {
+                        comprobarActivo(existente);
                         existente.setEsConocido(true);
                         existente.setFechaUltimoUso(OffsetDateTime.now());
                         return beneficiarioRepository.save(existente);
                     })
-                    .orElseGet(() -> beneficiarioRepository.save(Beneficiario.builder()
-                            .cliente(cliente)
-                            .nombreBeneficiario(nombre)
-                            .entidadFinanciera("Lambda Bank")
-                            .codigoPais("PE")
-                            .esConocido(false)
-                            .fechaPrimerUso(OffsetDateTime.now())
-                            .fechaUltimoUso(OffsetDateTime.now())
-                            .esActivo(true)
-                            .build()));
+                    .orElseGet(() -> crearBeneficiarioSinCuenta(cliente, nombre, false));
         }
 
         boolean nuevo = "nuevo".equalsIgnoreCase(tipoBeneficiario);
         String nombre = nuevo ? "Destinatario nuevo" : "Destinatario recurrente";
         return beneficiarioRepository
                 .findFirstByCliente_IdClienteAndNombreBeneficiario(cliente.getIdCliente(), nombre)
-                .orElseGet(() -> beneficiarioRepository.save(Beneficiario.builder()
-                        .cliente(cliente)
-                        .nombreBeneficiario(nombre)
-                        .entidadFinanciera("Lambda Bank")
-                        .codigoPais("PE")
-                        .esConocido(!nuevo)
-                        .fechaPrimerUso(OffsetDateTime.now())
-                        .fechaUltimoUso(OffsetDateTime.now())
-                        .esActivo(true)
-                        .build()));
+                .map(TransaccionReferenciasResolver::comprobarActivo)
+                .orElseGet(() -> crearBeneficiarioSinCuenta(cliente, nombre, !nuevo));
+    }
+
+    private Beneficiario crearBeneficiarioSinCuenta(Cliente cliente, String nombre, boolean conocido) {
+        OffsetDateTime ahora = OffsetDateTime.now();
+        return beneficiarioRepository.save(Beneficiario.builder().cliente(cliente).nombreBeneficiario(nombre)
+                .entidadFinanciera("Lambda Shield").codigoPais("PE").esConocido(conocido)
+                .fechaPrimerUso(ahora).fechaUltimoUso(ahora).esActivo(true).build());
+    }
+    private static Beneficiario comprobarActivo(Beneficiario beneficiario) {
+        if (!beneficiario.isEsActivo()) throw new IllegalArgumentException("El destinatario está desactivado");
+        return beneficiario;
+    }
+
+    private Beneficiario beneficiarioPorCuenta(Cliente cliente, EvaluarTransaccionCommand request) {
+        String numero = request.numeroCuentaDestino().replace(" ", "").trim();
+        var destino = cuentas.findByNumeroCuenta(numero);
+        if (destino.isEmpty() && "lambda".equals(request.bancoDestino())) {
+            throw new IllegalArgumentException("No existe una cuenta Lambda Shield con ese número");
+        }
+        if (destino.isPresent() && (destino.get().getEstadoCuenta() != com.lambdashield.fraude.domain.enums.EstadoCuenta.ACTIVA
+                || !destino.get().getCliente().isEsActivo())) {
+            throw new IllegalArgumentException("La cuenta de destino no está disponible");
+        }
+        if (destino.isPresent() && destino.get().getCliente().getIdCliente().equals(cliente.getIdCliente())) {
+            throw new IllegalArgumentException("Selecciona una cuenta de otro destinatario");
+        }
+        var existente = beneficiarioRepository.findFirstByCliente_IdClienteAndNumeroCuentaDestino(cliente.getIdCliente(), numero);
+        if (existente.isPresent()) {
+            Beneficiario beneficiario = existente.get();
+            comprobarActivo(beneficiario);
+            destino.ifPresent(c -> {
+                beneficiario.setNombreBeneficiario(com.lambdashield.fraude.domain.customer.NombreClienteFormatter.nombreCompleto(c.getCliente()));
+                beneficiario.setEntidadFinanciera("Lambda Shield");
+            });
+            beneficiario.setFechaUltimoUso(OffsetDateTime.now());
+            beneficiario.setEsConocido(true);
+            return beneficiario;
+        }
+        String nombre = destino.map(c -> com.lambdashield.fraude.domain.customer.NombreClienteFormatter.nombreCompleto(c.getCliente()))
+                .orElse(request.beneficiarioNombre());
+        if (nombre == null || nombre.isBlank()) throw new IllegalArgumentException("El nombre del destinatario es obligatorio");
+        String banco = destino.isPresent() ? "Lambda Shield" : switch (request.bancoDestino() == null ? "" : request.bancoDestino()) {
+            case "bcp" -> "BCP";
+            case "bbva" -> "BBVA";
+            case "interbank" -> "Interbank";
+            case "scotiabank" -> "Scotiabank";
+            default -> "Lambda Shield";
+        };
+        return beneficiarioRepository.save(Beneficiario.builder().cliente(cliente).nombreBeneficiario(nombre.trim())
+                .numeroCuentaDestino(numero).entidadFinanciera(banco).codigoPais("PE").esConocido(false).esActivo(true)
+                .fechaPrimerUso(OffsetDateTime.now()).fechaUltimoUso(OffsetDateTime.now()).build());
     }
 
     private static String capitalizar(String texto) {

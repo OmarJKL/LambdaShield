@@ -1,8 +1,8 @@
 package com.lambdashield.fraude.domain.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
 import java.math.BigDecimal;
+import lombok.*;
 
 @Entity
 @Table(name = "evaluacion_regla")
@@ -33,6 +33,15 @@ public class EvaluacionRegla {
 
     @Column(name = "peso_aplicado", nullable = false, precision = 5, scale = 2)
     private BigDecimal pesoAplicado;
+
+    @Column(name = "maximo_aplicado")
+    private Integer maximoAplicado;
+
+    @Column(name = "etiqueta_aplicada", length = 150)
+    private String etiquetaAplicada;
+
+    @Column(name = "version_aplicada")
+    private Integer versionAplicada;
 
     @Column(name = "detalle_json", columnDefinition = "TEXT")
     private String detalleJson;

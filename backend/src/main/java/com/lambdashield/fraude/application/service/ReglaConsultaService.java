@@ -3,10 +3,9 @@ package com.lambdashield.fraude.application.service;
 import com.lambdashield.fraude.application.model.ReglaCatalogo;
 import com.lambdashield.fraude.domain.entity.ReglaFraude;
 import com.lambdashield.fraude.repository.ReglaFraudeRepository;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 public class ReglaConsultaService {
@@ -25,8 +24,13 @@ public class ReglaConsultaService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<ReglaCatalogo> listarTodas() {
+        return reglaFraudeRepository.findAllByOrderByCodigoReglaAsc().stream().map(this::toCatalogo).toList();
+    }
+
     private ReglaCatalogo toCatalogo(ReglaFraude regla) {
-        int peso = regla.getPeso() != null ? regla.getPeso().intValue() : 0;
-        return new ReglaCatalogo(regla.getCodigoRegla(), regla.getNombreRegla(), regla.getDescripcion(), peso);
+        int peso = CatalogoReglasService.pesoEntero(regla);
+        return new ReglaCatalogo(regla.getCodigoRegla(), regla.getNombreRegla(), regla.getDescripcion(), peso, regla.isEsActiva());
     }
 }

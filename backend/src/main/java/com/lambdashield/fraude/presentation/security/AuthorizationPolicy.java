@@ -1,67 +1,51 @@
 package com.lambdashield.fraude.presentation.security;
 
-import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
-
 import java.util.Optional;
+import java.util.Set;
 
-/** Política de acceso por rol, desacoplada de Servlet y de la escritura de respuestas HTTP. */
+/** Lista explícita de capacidades; rutas nuevas quedan denegadas hasta declararlas. */
 @Component
 public class AuthorizationPolicy {
+    private static final Set<String> LECTURAS = Set.of("/api/v1/evaluation", "/api/v1/metric",
+            "/api/v1/metric/summary", "/api/v1/metric/movement", "/api/v1/metric/recent",
+            "/api/v1/rule", "/api/v1/report/export");
+    private static final Set<String> PAGINAS = Set.of("/", "/transacciones", "/reglas", "/reportes");
 
-    private static final String CLIENTE = "CLIENTE";
-    private static final String ANALISTA = "ANALISTA";
-    private static final String ADMIN = "ADMIN";
-
-    /** Devuelve el mensaje de rechazo para una API, o vacío cuando el rol puede continuar. */
     public Optional<String> rechazoApi(String rol, String metodo, String ruta) {
-        if (HttpMethod.DELETE.matches(metodo)) {
-            // Solo la gestión de usuarios permite baja física; las evaluaciones
-            // usan PATCH (baja lógica) y el resto de rutas rechazan DELETE.
-            if (ADMIN.equals(rol) && ruta.startsWith("/api/v1/user")) {
-                return Optional.empty();
-            }
-            return Optional.of("DELETE no permitido; use PATCH para desactivar");
+        boolean admin = "ADMIN".equals(rol);
+        boolean lector = admin || "ANALISTA".equals(rol);
+        boolean usuario = ruta.equals("/api/v1/user") || ruta.matches("/api/v1/user/-?[0-9]+(?:/clave)?");
+        if (ruta.equals("/api/v1/rule/assistant/status") && Set.of("GET", "HEAD").contains(metodo)
+                || ruta.equals("/api/v1/rule/assistant/review") && "POST".equals(metodo)) {
+            return admin ? Optional.empty() : Optional.of("No autorizado");
         }
-        // La gestión de usuarios es exclusiva de ADMIN, incluida la consulta.
-        if (!ADMIN.equals(rol) && ruta.startsWith("/api/v1/user")) {
-            return Optional.of("No autorizado");
+        if (ruta.equals("/api/v1/account/destination") && Set.of("GET", "HEAD").contains(metodo)) {
+            return "CLIENTE".equals(rol) ? Optional.empty() : Optional.of("No autorizado");
         }
-        if (ADMIN.equals(rol)) return Optional.empty();
-        if (ANALISTA.equals(rol) && HttpMethod.GET.matches(metodo)) return Optional.empty();
-        if (CLIENTE.equals(rol)
-                && HttpMethod.POST.matches(metodo)
-                && "/api/v1/evaluation".equals(ruta)) {
-            return Optional.empty();
+        if (ruta.equals("/api/v1/notification") && Set.of("GET", "HEAD").contains(metodo)
+                || ruta.matches("/api/v1/notification/-?[0-9]+/leer") && "PATCH".equals(metodo)
+                || ruta.equals("/api/v1/notification/leer-todas") && "PATCH".equals(metodo)) {
+            return "CLIENTE".equals(rol) ? Optional.empty() : Optional.of("No autorizado");
         }
-        return Optional.of("No autorizado");
+        boolean permitido = switch (metodo) {
+            case "GET", "HEAD" -> lector && LECTURAS.contains(ruta)
+                    || admin && (ruta.equals("/api/v1/user") || ruta.matches("/api/v1/user/-?[0-9]+"));
+            case "POST" -> ruta.equals("/api/v1/evaluation") && (admin || "CLIENTE".equals(rol))
+                    || admin && ruta.equals("/api/v1/user");
+            case "PATCH" -> admin && (ruta.matches("/api/v1/evaluation/-?[0-9]+(?:/activar)?")
+                    || usuario && !ruta.equals("/api/v1/user")
+                    || ruta.matches("/api/v1/rule/[A-Za-z0-9_-]+/estado"));
+            case "DELETE" -> admin && ruta.matches("/api/v1/user/-?[0-9]+");
+            default -> false;
+        };
+        return permitido ? Optional.empty() : Optional.of("No autorizado");
     }
 
-    /** Devuelve la ruta de redirección para una página, o vacío cuando el rol puede continuar. */
     public Optional<String> redireccionPagina(String rol, String ruta) {
-        if (ADMIN.equals(rol)) return Optional.empty();
-
-        if (ANALISTA.equals(rol)) {
-            return esPaginaCliente(ruta) || esPaginaSimulador(ruta) || esPaginaUsuarios(ruta)
-                    ? Optional.of("/")
-                    : Optional.empty();
-        }
-
-        if (CLIENTE.equals(rol)) {
-            return esPaginaCliente(ruta) ? Optional.empty() : Optional.of("/operacion");
-        }
+        if ("ADMIN".equals(rol) && (PAGINAS.contains(ruta) || Set.of("/usuarios", "/simulador", "/operacion").contains(ruta))) return Optional.empty();
+        if ("ANALISTA".equals(rol)) return PAGINAS.contains(ruta) ? Optional.empty() : Optional.of("/");
+        if ("CLIENTE".equals(rol)) return "/operacion".equals(ruta) ? Optional.empty() : Optional.of("/operacion");
         return Optional.of("/login");
-    }
-
-    private static boolean esPaginaCliente(String ruta) {
-        return ruta.equals("/operacion") || ruta.startsWith("/operacion/");
-    }
-
-    private static boolean esPaginaSimulador(String ruta) {
-        return ruta.equals("/simulador") || ruta.startsWith("/simulador/");
-    }
-
-    private static boolean esPaginaUsuarios(String ruta) {
-        return ruta.equals("/usuarios") || ruta.startsWith("/usuarios/");
     }
 }

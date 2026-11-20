@@ -5,6 +5,86 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!form) return;
 
+    const contactoGuardado = document.getElementById('contactoGuardado');
+    const cuentaDestino = document.getElementById('cuentaDestino');
+    const nombreDestino = document.getElementById('destinatarioNombre');
+    const bancoDestino = document.getElementById('bancoDestino');
+    const estadoDestino = document.getElementById('estadoDestinatario');
+    const bancos = { 'Lambda Shield': 'lambda', BCP: 'bcp', BBVA: 'bbva', Interbank: 'interbank', Scotiabank: 'scotiabank' };
+    let consulta = 0;
+    let temporizador;
+    function estado(texto) { if (estadoDestino) estadoDestino.textContent = texto; }
+    function limpiarTitular() {
+        consulta++;
+        clearTimeout(temporizador);
+        nombreDestino.value = '';
+        nombreDestino.readOnly = bancoDestino?.value === 'lambda';
+        nombreDestino.placeholder = nombreDestino.readOnly ? 'Se completa al ingresar la cuenta' : 'Nombre del destinatario';
+        cuentaDestino.setCustomValidity?.('');
+    }
+    async function resolverTitular() {
+        if (!bancoDestino) return true;
+        const version = ++consulta;
+        const numero = cuentaDestino.value.replace(/ /g, '').trim();
+        if (!numero) { estado('Ingresa la cuenta para consultar su titular.'); return false; }
+        if (!/^[0-9 -]{6,50}$/.test(numero)) { estado('Revisa el formato del número de cuenta.'); return false; }
+        const contacto = Array.from(contactoGuardado?.options || []).find(o => o.value
+            && o.dataset.cuenta.replace(/ /g, '') === numero && bancos[o.dataset.banco] === bancoDestino.value);
+        if (contacto && bancoDestino.value !== 'lambda') {
+            nombreDestino.value = contacto.dataset.nombre;
+            nombreDestino.readOnly = true;
+            contactoGuardado.value = contacto.value;
+            estado('Destinatario de tu agenda. Confirma sus datos antes de continuar.');
+            return true;
+        }
+        if (bancoDestino.value !== 'lambda') {
+            nombreDestino.readOnly = false;
+            estado('No podemos consultar titulares de otros bancos. Escribe y confirma el nombre del destinatario.');
+            return Boolean(nombreDestino.value.trim());
+        }
+        nombreDestino.readOnly = true;
+        estado('Consultando titular…');
+        try {
+            const res = await LSApi.fetch('/api/v1/account/destination?numero=' + encodeURIComponent(numero));
+            if (version !== consulta) return false;
+            if (!res.ok) throw new Error(res.status === 404
+                ? 'Cuenta no disponible. Revisa el número; no puede ser tu propia cuenta.' : 'No se pudo consultar el titular. Inténtalo otra vez.');
+            const destino = await res.json();
+            if (version !== consulta) return false;
+            nombreDestino.value = destino.nombre;
+            cuentaDestino.value = destino.numeroCuenta;
+            cuentaDestino.setCustomValidity?.('');
+            if (contactoGuardado) contactoGuardado.value = contacto?.value || '';
+            estado('Titular confirmado en Lambda Shield.');
+            return true;
+        } catch (error) {
+            if (version !== consulta) return false;
+            nombreDestino.value = '';
+            estado(error.message || 'No se pudo consultar el titular.');
+            cuentaDestino.setCustomValidity?.('Consulta una cuenta de destino válida antes de continuar.');
+            return false;
+        }
+    }
+    cuentaDestino.addEventListener('input', () => {
+        limpiarTitular();
+        if (contactoGuardado) contactoGuardado.value = '';
+        estado('Ingresa la cuenta para consultar su titular.');
+        temporizador = setTimeout(resolverTitular, 350);
+    });
+    cuentaDestino.addEventListener('blur', () => { clearTimeout(temporizador); resolverTitular(); });
+    bancoDestino?.addEventListener('change', () => { limpiarTitular(); resolverTitular(); });
+    contactoGuardado?.addEventListener('change', () => {
+        const contacto = contactoGuardado.selectedOptions[0];
+        if (!contacto?.value) return;
+        document.getElementById('destinatarioNombre').value = contacto.dataset.nombre;
+        document.getElementById('cuentaDestino').value = contacto.dataset.cuenta;
+        document.getElementById('bancoDestino').value = bancos[contacto.dataset.banco] || 'lambda';
+        cuentaDestino.setCustomValidity?.('');
+        clearTimeout(temporizador);
+        resolverTitular();
+        document.getElementById('trMonto').focus();
+    });
+
     function crearLineaRecibo(etiqueta, valor) {
         const linea = document.createElement('div');
         const strong = document.createElement('strong');
@@ -24,12 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
         icono.className = 'bi bi-check-circle-fill fs-4 text-success';
         const titulo = document.createElement('strong');
         titulo.className = 'fs-5';
-        titulo.textContent = '¡Transferencia Exitosa!';
+        titulo.textContent = 'Operación aprobada';
         cabecera.append(icono, titulo);
 
         const mensaje = document.createElement('p');
         mensaje.className = 'mb-2 small text-secondary';
-        mensaje.textContent = 'Tu dinero ha sido transferido correctamente al destinatario.';
+        mensaje.textContent = 'La operación fue aprobada y el cargo se registró en tu cuenta.';
 
         const detalle = document.createElement('div');
         detalle.className = 'p-2 rounded bg-white border small dato-mono text-dark';
@@ -37,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
             crearLineaRecibo('N° Operación:', data.id),
             crearLineaRecibo('Monto:', 'S/ ' + Number(data.monto).toFixed(2)),
             crearLineaRecibo('Fecha y Hora:', data.fecha),
-            crearLineaRecibo('Estado:', 'Aprobada')
+            crearLineaRecibo('Estado:', data.estado)
         );
 
         alerta.append(cabecera, mensaje, detalle);
@@ -64,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mensaje.style.color = 'var(--utp-rojo-oscuro)';
         mensaje.textContent = esBloqueo
             ? 'El motor antifraude detectó indicadores de riesgo crítico y detuvo la operación. El dinero no fue transferido.'
-            : 'Hemos detectado parámetros atípicos en esta operación. Por tu seguridad, la transferencia ha sido pausada temporalmente para revisión de identidad.';
+            : 'La operación quedó retenida por indicadores de riesgo. Tu saldo no fue descontado; puedes consultar el aviso en la campana.';
 
         const detalle = document.createElement('div');
         detalle.className = 'p-2 rounded bg-white border small dato-mono text-dark';
@@ -94,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const soporte = document.createElement('p');
         soporte.className = 'mt-2 mb-0 small';
-        soporte.textContent = 'Soporte: Comunícate al 0800-LAMBDA si fuiste tú quien solicitó el movimiento.';
+        soporte.textContent = 'El detalle de este evento queda guardado en tu campana de notificaciones.';
         detalle.appendChild(soporte);
 
         alerta.append(cabecera, mensaje, detalle);
@@ -124,6 +204,8 @@ document.addEventListener('DOMContentLoaded', () => {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        if (btnTransferir.disabled) return;
+
         btnTransferir.disabled = true;
         const spinner = document.createElement('span');
         spinner.className = 'spinner-border spinner-border-sm';
@@ -142,10 +224,18 @@ document.addEventListener('DOMContentLoaded', () => {
             // El servidor deriva hora, frecuencia, dispositivo, IP y el tipo de
             // beneficiario a partir del historial real del cliente.
             beneficiarioNombre: document.getElementById('destinatarioNombre').value.trim(),
+            numeroCuentaDestino: document.getElementById('cuentaDestino').value.trim(),
+            bancoDestino: document.getElementById('bancoDestino')?.value || 'lambda',
             ip: 'conocida'
         };
 
         try {
+            if (!await resolverTitular()) {
+                pintarError('Revisa la cuenta y el titular antes de continuar.');
+                return;
+            }
+            payload.beneficiarioNombre = nombreDestino.value.trim();
+            payload.numeroCuentaDestino = cuentaDestino.value.trim();
             const res = await LSApi.fetch('/api/v1/evaluation', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -153,17 +243,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!res.ok) {
-                let mensaje = 'No se pudo procesar la transferencia.';
-                try {
-                    const err = await res.json();
-                    if (err && err.errores && err.errores.length) mensaje = err.errores[0];
-                } catch (e) {
-                    // Respuesta sin cuerpo JSON: se conserva el mensaje genérico.
-                }
-                pintarError(mensaje);
+                pintarError(await LSApi.mensajeError(res, 'No se pudo procesar la transferencia.'));
                 return;
             }
             const data = await res.json();
+            window.LSNotifications?.refresh();
+            const saldoEl = document.getElementById('saldoDisponibleTexto');
+            if (saldoEl) saldoEl.textContent = LSUi.moneda(data.saldoDisponible);
             resultadoDiv.classList.remove('d-none');
 
             if (data.nivel === 'bajo' || data.nivel === 'medio') {
@@ -179,7 +265,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (trVacia) trVacia.remove();
 
                 // 2. Crear nueva fila dinámica
-                const esAprobada = (data.nivel === 'bajo' || data.nivel === 'medio');
 
                 const diccCat = {
                     servicios: 'Servicios',
@@ -207,19 +292,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const tdEstado = document.createElement('td');
                 const badge = document.createElement('span');
-                badge.className = 'badge py-1 px-2 ' + (
-                    data.nivel === 'bajo' ? 'bg-success'
-                        : data.nivel === 'medio' ? 'bg-warning text-dark'
-                            : data.nivel === 'alto' ? 'bg-danger' : 'bg-dark');
+                badge.className = 'etiqueta-nivel ' + LSUi.claseNivel(data.nivel);
                 const iconoBadge = document.createElement('i');
-                iconoBadge.className = 'bi ' + (
-                    data.nivel === 'bajo' ? 'bi-check-circle-fill'
-                        : data.nivel === 'medio' ? 'bi-eye-fill'
-                            : data.nivel === 'alto' ? 'bi-shield-exclamation' : 'bi-x-octagon-fill');
-                const textoEstado = data.nivel === 'bajo' ? ' Procesada con éxito'
-                    : data.nivel === 'medio' ? ' En monitoreo'
-                        : data.nivel === 'alto' ? ' Retenida en revisión' : ' Bloqueada';
-                badge.append(iconoBadge, document.createTextNode(textoEstado));
+                iconoBadge.className = 'bi ' + data.iconoEstado;
+                badge.append(iconoBadge, document.createTextNode(' ' + data.estado));
                 tdEstado.appendChild(badge);
 
                 const nuevaFila = document.createElement('tr');
@@ -229,24 +305,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 tablaOperaciones.prepend(nuevaFila);
                 setTimeout(() => nuevaFila.style.backgroundColor = 'transparent', 1500);
 
-                // 3. Descontar saldo contable si la transacción fue aprobada
-                if (esAprobada) {
-                    const saldoEl = document.getElementById('saldoDisponibleTexto');
-                    if (saldoEl) {
-                        let saldoActual = parseFloat(saldoEl.textContent.replace(/,/g, '')) || 4850.00;
-                        let nuevoSaldo = Math.max(0, saldoActual - data.monto);
-                        saldoEl.textContent = nuevoSaldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    }
-                }
+
             }
 
+            if (contactoGuardado) contactoGuardado.value = '';
             document.getElementById('destinatarioNombre').value = '';
             document.getElementById('cuentaDestino').value = '';
+            limpiarTitular();
+            estado('Ingresa la cuenta para consultar su titular.');
             document.getElementById('trMonto').value = '';
 
         } catch (err) {
-            console.error(err);
-            pintarError('Ocurrió un error al procesar la transferencia.');
+            if (!err.gestionado) pintarError(err.message || 'No se pudo conectar con el servidor.');
         } finally {
             btnTransferir.disabled = false;
             const iconoBoton = document.createElement('i');

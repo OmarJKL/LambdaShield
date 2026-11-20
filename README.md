@@ -1,403 +1,196 @@
-# Lambda Shield - Sistema de Detección de Fraude Bancario
+# Lambda Shield — Sistema de detección de fraude bancario
 
-> Plataforma web bancaria y motor heurístico de prevención de fraude en tiempo real.
-> Desarrollada con **Java 21 LTS**, **Spring Boot 4.1.1**, **Spring Data JPA**, **Thymeleaf**, **Bootstrap 5** y **JavaScript Vanilla**.
+Aplicación académica que evalúa operaciones antes de modificar el saldo de una cuenta. Combina un portal de cliente, un panel de análisis y un motor explicable de ocho reglas. La evaluación, sus factores y las operaciones se persisten mediante JPA.
 
----
+**Estado documentado: 14 de noviembre de 2026.** Se conserva Spring MVC con **Thymeleaf**, CSS y JavaScript vanilla. Las páginas y las APIs conviven en el mismo artefacto Maven; no se está migrando a un frontend separado.
 
-## Descripción del proyecto
+## 1. Guía de lectura
 
-**Lambda Shield** combina una interfaz de operaciones financieras para clientes con un centro de control para analistas y administradores antifraude.
+| Necesidad | Documento |
+| --- | --- |
+| Instalar, configurar, migrar y diagnosticar | [Instalación y operación](docs/08_INSTALACION_OPERACION.md) |
+| Entender capas, componentes y Thymeleaf | [Arquitectura](docs/01_ARQUITECTURA.md) |
+| Conocer pantallas y flujos de negocio | [Funcionalidades](docs/02_FUNCIONALIDADES.md) |
+| Revisar pesos, umbrales y factores | [Reglas antifraude](docs/03_REGLAS_ANTIFRAUDE.md) |
+| Entender persistencia, consultas y bloqueos | [Datos y consultas JPA](docs/04_CONSULTAS_JPA.md) |
+| Distinguir valor esperado de capacidades reales | [Valor de negocio y límites](docs/05_VALOR_NEGOCIO.md) |
+| Comprender autenticación, CSRF y permisos | [Seguridad](docs/06_SEGURIDAD.md) |
+| Integrar un cliente HTTP | [Referencia de API](docs/07_API_REST.md) |
+| Ejecutar y mantener las verificaciones | [Pruebas y calidad](docs/09_PRUEBAS_CALIDAD.md) |
+| Usar cuentas con historial ya preparado | [Cuentas y accesos demo](docs/11_CUENTAS_Y_ACCESOS_DEMO.md) |
+| Estudiar evolución pendiente del motor | [Reglas dinámicas y Qwen](docs/10_PROPUESTA_REGLAS_DINAMICAS_LLM.md) |
+| Configurar el asistente de revisión con OpenRouter | [Asistente de reglas IA](docs/12_ASISTENTE_REGLAS_IA.md) |
+| Revisar congruencia, limpieza y deuda técnica | [Revisión de código](docs/13_REVISION_CONGRUENCIA_CODIGO.md) |
 
-El núcleo implementa un **motor de reglas de scoring ponderado** (RF001-RF008) alineado con la especificación de arquitectura. Cada evaluación se guarda en PostgreSQL junto con su transacción, cliente, cuenta, dispositivo, beneficiario y desglose de reglas.
+El [índice de documentación](docs/README.md) propone recorridos según el perfil del lector.
 
----
+## 2. Qué implementa
 
-## Arquitectura (N capas)
+- CLIENTE: consulta de cuenta y saldo, envío de operaciones, historial propio y avisos de riesgo.
+- ANALISTA: dashboard, historial de evaluaciones, catálogo de reglas y reportes.
+- ADMIN: las capacidades de administración, simulador persistente, gestión de usuarios y desactivación/reactivación de evaluaciones.
+- Decisiones por puntaje: aprobar, monitorear, retener o bloquear.
+- Saldo en `BigDecimal`, operaciones transaccionales y bloqueo de cuenta para evitar sobrescrituras concurrentes.
+- Exportación filtrada a CSV, XLSX y PDF.
+- Spring Security con permisos explícitos, CSRF, revalidación de sesiones y límites de solicitudes.
+
+Una operación aprobada modifica la cuenta local del cliente. El proyecto no integra una red bancaria ni acredita una cuenta externa del destinatario. El simulador también escribe operaciones y puede modificar saldos; se debe usar en una base de desarrollo.
+
+## 3. Tecnologías y organización
+
+| Área | Implementación |
+| --- | --- |
+| Compilación | Java 21, Maven Wrapper |
+| Servidor | Spring Boot 4.1.1, Spring MVC |
+| Persistencia | Spring Data JPA, Hibernate, PostgreSQL |
+| Interfaz | Thymeleaf, Bootstrap, Bootstrap Icons, Chart.js, JavaScript vanilla |
+| Seguridad | Spring Security y BCrypt |
+| Exportaciones | Apache POI y OpenPDF |
+| Verificación | JUnit, MockMvc, AssertJ, ArchUnit, JaCoCo, H2 y `node:test` |
+
+Las versiones de dependencias están en [pom.xml](pom.xml); las de recursos CDN, en las plantillas.
 
 ```text
+backend/src/main/java/com/lambdashield/fraude/
+├── presentation/   # REST, MVC, DTO, mappers, exportadores y filtros
+├── application/    # Casos de uso, modelos y servicios
+├── domain/         # Entidades, enums y reglas puras
+├── repository/     # Contratos Spring Data JPA
+└── config/         # Composición, seguridad y sembradores opcionales
+backend/src/main/resources/  # Configuración y SQL
+backend/src/test/            # Pruebas Java y configuración H2
 frontend/src/main/resources/
-├── templates/           # Vistas Thymeleaf
-└── static/              # CSS, JavaScript e imágenes
-
-backend/src/main/
-├── java/com/lambdashield/fraude/
-│   ├── presentation/              # Capa de presentación (HTTP y vistas)
-│   │   ├── api/rest/              # Controladores REST (/api/v1/**)
-│   │   ├── web/                   # Controladores MVC/Thymeleaf
-│   │   ├── dto/                   # Contratos JSON de entrada y salida
-│   │   ├── mapper/                # Traduce modelos de aplicación a DTO y etiquetas visuales
-│   │   ├── export/                # Serialización CSV de reportes
-│   │   ├── security/              # Interceptor y política de autorización por rol
-│   │   └── exception/             # Traducción de errores a HTTP/vistas
-│   ├── application/               # Capa de aplicación (casos de uso)
-│   │   ├── command/               # Comandos de entrada de los casos de uso
-│   │   ├── model/                 # Modelos de resultado independientes de la interfaz
-│   │   ├── mapper/                # Entidades del dominio -> modelos de aplicación
-│   │   └── service/               # Casos de uso, consultas y coordinación
-│   ├── domain/                    # Capa de dominio (sin dependencias hacia otras capas)
-│   │   ├── entity/                # Entidades JPA del modelo de negocio
-│   │   ├── enums/                 # Estados y tipos del dominio
-│   │   ├── fraud/                 # Motor antifraude: factores y reglas
-│   │   ├── device/                # Huella de dispositivo
-│   │   └── customer/              # Reglas de presentación del nombre del cliente
-│   ├── repository/                # Persistencia: contratos Spring Data JPA
-│   └── config/                    # Composición y configuración (raíz de dependencias)
-│       └── seed/                  # Sembradores demo idempotentes por responsabilidad
-└── resources/                     # Configuración del backend y scripts SQL
-
-backend/src/test/                  # Pruebas unitarias, de integración y de arquitectura
-pom.xml                            # Build Maven del backend y recursos frontend
+├── templates/              # Pantallas Thymeleaf y fragmentos compartidos
+└── static/                 # CSS, JavaScript e imágenes
+frontend/tests/             # Pruebas JavaScript sin dependencias npm
+docs/                       # Guías detalladas
 ```
 
-Flujo de dependencias: `presentation` -> `application` -> `domain`, con `repository` como persistencia usada por `application`. `config` es la raíz de composición y es la única capa que puede conocer a todas las demás. Los casos de uso devuelven modelos de `application/model` y nunca DTO HTTP; `presentation/mapper` añade las etiquetas visuales (estado, icono, color) y formatea fechas. Los sembradores demo se separan por catálogos, clientes, usuarios y evaluaciones; `DataInitializer` sólo coordina su orden.
+## 4. Inicio local
 
-Las dependencias entre capas están verificadas por pruebas de arquitectura con **ArchUnit** (`backend/src/test/java/com/lambdashield/fraude/architecture/ArquitecturaCapasTest.java`). Si una dependencia prohibida se introduce, `mvnw test` falla.
+Requisitos: JDK 21 o un JDK compatible con `release=21`, PostgreSQL o Docker, y navegador moderno. Node.js 22 se usa para las pruebas del frontend; no es necesario para servir la aplicación.
 
-Reglas verificadas:
-
-| Regla | Descripción |
-| :--- | :--- |
-| Capas | `presentation` sólo lo usa `config`; `application` sólo lo usan `presentation` y `config`; `repository` sólo lo usan `application` y `config`; `domain` sólo lo usan `application`, `repository` y `config`. |
-| Dominio puro | `domain` no depende de Spring. |
-| Aplicación sin web | `application` no depende de `jakarta.servlet` ni de `org.springframework.web`/`ui`. |
-| Controladores | Todo `@RestController`/`@Controller` vive en `presentation` y no accede a `repository`. |
-| Sin ciclos | Los módulos de primer nivel no forman dependencias circulares. |
-
-Decisiones explícitas:
-
-- **Entidades JPA en el dominio:** `domain/entity` usa `jakarta.persistence` y Lombok. Es un compromiso aceptado para no duplicar el modelo; las reglas de negocio puras viven en `domain/fraud`, sin anotaciones de persistencia.
-- **Acceso a repositorios desde la aplicación:** los casos de uso consultan `repository` directamente. No se introducen puertos de persistencia porque el proyecto usa Spring Data JPA como única fuente de datos.
-- **Entidades sin casos de uso:** `AlertaFraude`, `Auditoria`, `CasoFraude`, `HistorialCaso` y `CaracteristicaTransaccion` están mapeadas al esquema pero aún no tienen servicios que las usen. Se conservan para que `ddl-auto=validate` siga coincidiendo con la base de datos.
-
-El proyecto conserva una aplicación Spring MVC/Thymeleaf: las vistas y recursos pertenecen al frontend, pero Maven los incorpora al artefacto del backend para servirlos. REST y páginas MVC tienen paquetes separados; los controladores MVC no son endpoints REST.
-
-**No existen stores en memoria.** Usuarios, clientes y evaluaciones se leen y escriben mediante JPA en PostgreSQL.
-
-### Aplicación de SOLID
-
-- **Responsabilidad única:** consultas, métricas, generación de CSV, resolución de dispositivos, autorización y carga demo están en componentes separados.
-- **Abierto/cerrado e inversión de dependencias:** el motor consume `ReglaEvaluable`; agregar una regla no requiere editar el flujo de evaluación.
-- **Sustitución e interfaces pequeñas:** cada regla implementa el mismo contrato de una sola operación y puede probarse de forma aislada.
-- **Separación de capas:** el controlador adapta el DTO HTTP a `EvaluarTransaccionCommand`; las reglas usan `TransaccionEvaluable` y `FactorEvaluado`, sin depender de DTO web ni de Spring.
-
-Los controladores no contienen lógica de negocio. Las entidades JPA usan getters/setters explícitos en vez de `@Data`, evitando `equals`, `hashCode` y `toString` generados sobre relaciones bidireccionales.
-
-> **Nota:** las cifras del dashboard (saldo, ingresos, egresos, variaciones, serie diaria y movimientos recientes) provienen de PostgreSQL: saldo de las cuentas activas y movimientos según la naturaleza (débito/crédito) de cada transacción. Las variaciones comparan el periodo elegido con el inmediatamente anterior.
-
----
-
-## Persistencia
-
-La aplicación usa las tablas existentes del esquema PostgreSQL:
-
-- `usuario_sistema`, `rol`, `usuario_rol`
-- `cliente`, `cuenta`, `dispositivo`, `beneficiario`
-- `transaccion`, `evaluacion_fraude`, `evaluacion_regla`
-- `regla_fraude`, `canal`, `tipo_transaccion`
-- tablas auxiliares de alertas, casos y auditoría
-
-El esquema canónico está en `backend/src/main/resources/db/postgresql/BD-Desarrollo web.sql`.
-Los cambios de migración aplicados a una base existente están en `backend/src/main/resources/db/postgresql/migracion_soft_delete_postgresql.sql`.
-
-### Verificación del mapeo JPA contra PostgreSQL
-
-`spring.jpa.hibernate.ddl-auto=validate` obliga a Hibernate a comparar cada entidad con las columnas reales al arrancar. Para verificar el esquema sin levantar el servidor web:
+Desde la raíz del repositorio, en PowerShell:
 
 ```powershell
-# Con las credenciales de .env no hace falta exportar nada
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.main.web-application-type=none"
+Copy-Item .env.example .env
 ```
 
-Si una columna, tabla o tipo no coincide, el arranque falla con `Schema validation: ...` y el mensaje indica la tabla y la columna exactas. Una base creada con la versión anterior del script debe recibir antes `migracion_soft_delete_postgresql.sql`; la migración es idempotente y añade `cliente.codigo_cliente`, `cliente.promedio_gasto`, `cliente.es_activo`, `dispositivo.direccion_ip`, `evaluacion_fraude.es_activa`, `evaluacion_fraude.fecha_desactivacion`, `usuario_sistema.id_cliente`, normaliza los tipos `jsonb`/`inet` a `TEXT`/`VARCHAR(45)` y quita la secuencia `IDENTITY` de `caracteristica_transaccion.id_transaccion`, cuya clave se comparte con `transaccion` mediante `@MapsId`.
+Edita `.env` con las credenciales de tu base. Para una instalación local de demostración, configura explícitamente:
 
-Las 18 tablas del esquema (`cliente`, `cuenta`, `beneficiario`, `canal`, `tipo_transaccion`, `dispositivo`, `transaccion`, `caracteristica_transaccion`, `regla_fraude`, `evaluacion_fraude`, `evaluacion_regla`, `usuario_sistema`, `alerta_fraude`, `caso_fraude`, `historial_caso`, `rol`, `usuario_rol`, `auditoria`) tienen entidad en `domain/entity`.
-
-`DataInitializer` carga de forma idempotente:
-
-- roles y usuarios de demostración (contraseñas cifradas con BCrypt)
-- clientes, cuentas y dispositivos conocidos
-- catálogos de canales y tipos de transacción
-- las ocho reglas antifraude
-- diez evaluaciones de ejemplo
-
-La carga no duplica datos al reiniciar la aplicación.
-
-### Baja lógica (sin DELETE)
-
-Las evaluaciones no se eliminan físicamente:
-
-- `PATCH /api/v1/evaluation/{id}` marca `evaluacion_fraude.es_activa = false`
-- registra `fecha_desactivacion`
-- cambia la transacción asociada a `REVERSADA`
-- la fila permanece en la base de datos y desaparece de las listas activas
-
-La operación es reversible:
-
-- `PATCH /api/v1/evaluation/{id}/activar` vuelve `es_activa` a `true`, borra `fecha_desactivacion` y la transacción recupera el estado que le corresponde según su nivel de riesgo (`bajo/medio` → `APROBADA`, `alto` → `RETENIDA`, `crítico` → `BLOQUEADA`).
-- El dinero es simétrico: al desactivar una operación aprobada se devuelve el monto a la cuenta, y al reactivarla se descuenta otra vez (con la misma validación de saldo).
-- `GET /api/v1/evaluation?activas=false` incluye también las desactivadas (cada registro trae el flag `activa`).
-
-No existe un endpoint `DELETE` sobre evaluaciones. Las peticiones `DELETE` a `/api/v1/evaluation` responden `405`. La única excepción es la gestión de usuarios (`DELETE /api/v1/user/{id}`), reservada a ADMIN.
-
-En la vista de historial, el administrador dispone de los botones **Desactivar** y **Reactivar** por fila, ambos con un modal de confirmación. El filtro **Desactivadas** muestra las que están dadas de baja.
-
----
-
-## Características principales
-
-### Portal del cliente
-
-- Transferencias protegidas con evaluación antifraude en tiempo real.
-- Factores de dispositivo, IP, horario y frecuencia derivados en el servidor.
-- **Tipo de destinatario derivado del historial**: el cliente no declara si el destinatario es nuevo o frecuente; se determina por las transferencias previas al mismo nombre (la primera vez es nuevo y a partir de la segunda, frecuente).
-- **Saldo real y persistente**: las operaciones aprobadas descuentan el saldo de la cuenta y registran `saldo_anterior`/`saldo_posterior`; si el saldo no alcanza, la operación se rechaza con `400 Saldo insuficiente`. Las operaciones retenidas o bloqueadas no mueven dinero.
-- Historial limitado a las operaciones del cliente autenticado.
-- Estados diferenciados por operación: procesada, en monitoreo, retenida en revisión o bloqueada.
-- Avisos de seguridad con las operaciones de riesgo alto o crítico y el detalle de las causas detectadas en cada rechazo.
-
-### Panel administrativo y analista
-
-- Dashboard con cifras reales: saldo de cuentas activas, ingresos/egresos, variaciones frente al periodo anterior, serie diaria y últimos movimientos.
-- Historial de evaluaciones con datos reales, filtros por nivel, monto y fecha, y vista de desactivadas.
-- Simulador manual de transacciones con desglose de factores.
-- Catálogo de reglas leído desde `regla_fraude`.
-- Reportes con filtros por fecha, nivel y cliente, y exportación en CSV, Excel y PDF.
-- Desactivación lógica de evaluaciones por parte de ADMIN.
-- Gestión de usuarios (solo ADMIN): alta, edición, cambio de clave, cambio de rol/estado y baja física, con protección del último administrador.
-
----
-
-## Motor de reglas antifraude
-
-| Código | Regla | Condición de disparo | Peso |
-| :--- | :--- | :--- | :---: |
-| **RF001** | Monto inusual | Gradual según `monto / promedio`: `<=1.5x` = 0; `>1.5x y <=3x` = 5-15; `>3x y <5x` = 15-22; `>=5x` = 25 | 25 |
-| **RF002** | Dispositivo nuevo | `es_dispositivo_nuevo = true` | 15 |
-| **RF003** | IP nueva | `es_ip_nueva = true` | 10 |
-| **RF004** | País nuevo | `es_pais_nuevo = true` | 30 |
-| **RF005** | Horario inusual | Operación entre 00:00 y 04:59 | 10 |
-| **RF006** | Alta frecuencia | Gradual según operaciones en la última hora | 25 |
-| **RF007** | Viaje imposible | Heurística de país + operaciones + IP | 40 |
-| **RF008** | Beneficiario nuevo con monto alto | `nuevo && monto > umbral` | 20 |
-
-Escala de decisión:
-
-- **0-29:** BAJO - aprobar
-- **30-59:** MEDIO - monitorear
-- **60-79:** ALTO - retener / alertar
-- **80-100:** CRÍTICO - bloquear / alerta crítica
-
-La suma se limita a 100 puntos.
-
----
-
-## Roles y permisos
-
-Las credenciales se validan contra `usuario_sistema` usando BCrypt. Los roles se resuelven desde `usuario_rol` y `rol`.
-
-| Rol | Usuario | Páginas | API |
-| :--- | :--- | :--- | :--- |
-| **ADMIN** | `admin` | Todas | Todos los métodos permitidos, incluido `PATCH /api/v1/evaluation/{id}`, la gestión de `/api/v1/user` y su `DELETE` |
-| **ANALISTA** | `analista` | Inicio, transacciones, reglas y reportes | Solo `GET /api/**`, excepto `/api/v1/user` (reservado a ADMIN) |
-| **CLIENTE** | `usuario`, `maria`, `cliente` | Solo `/operacion` | Solo `POST /api/v1/evaluation` para su propio cliente |
-
-Reglas de sesión:
-
-- Sin sesión, `/api/**` responde `401` con `{"error":"No autenticado"}`.
-- Sin sesión, las páginas protegidas redirigen a `/login`.
-- Si el rol no tiene permiso, la API responde `403` con `{"error":"No autorizado"}`.
-- El portal del cliente usa el `codigoCliente` de la sesión y no confía en el cliente enviado en el body.
-- `DELETE` solo está permitido en `/api/v1/user/{id}` (gestión de usuarios, solo ADMIN). En el resto de la API responde `405`.
-
-Las contraseñas de demostración no se publican en esta documentación; están definidas en `config/seed/UsuarioDemoSeeder` y se almacenan cifradas en la base de datos.
-
----
-
-## Requisitos
-
-- **JDK 21 LTS** o superior.
-- **PostgreSQL** con la base `lambda_shield` creada.
-- Maven Wrapper incluido (`mvnw.cmd` / `mvnw`).
-- Navegador moderno.
-
-Si el `java` por defecto del sistema es anterior a 21, apunta `JAVA_HOME` a un JDK 21+ antes de compilar, porque `pom.xml` usa `<release>21</release>`.
-
-La conexión se configura en `backend/src/main/resources/application.properties`. Por defecto usa:
-
-```text
-jdbc:postgresql://localhost:5432/lambda_shield
+```properties
+DEMO_DATA_ENABLED=true
+SESSION_COOKIE_SECURE=false
 ```
 
-El usuario, la contraseña y el resto de parámetros de conexión se configuran en el archivo **`.env`** de la raíz del repositorio:
+La carga demo está desactivada por defecto. Para ocho cuentas adicionales y 128 operaciones persistentes, ver [cuentas y accesos](docs/11_CUENTAS_Y_ACCESOS_DEMO.md). Sin ella, los clientes, usuarios, roles y reglas deben estar provisionados en la base. No existe registro público ni un endpoint de bootstrap del primer administrador.
 
-```text
-DB_USER=postgres
-DB_PASSWORD=postgres
-#DB_HOST=localhost
-#DB_PORT=5432
-#DB_NAME=lambda_shield
+Si usas el PostgreSQL de Compose:
+
+```powershell
+docker compose up -d
+docker compose ps
 ```
 
-Spring Boot lo carga al arrancar mediante `spring.config.import=optional:file:./.env[.properties]` en `application.properties`. Si el archivo no existe, se usan los valores por defecto de la tabla. Las variables de entorno reales (`DB_USER`, `DB_PASSWORD`, ...) tienen prioridad sobre `.env`, así que en producción basta con exportarlas sin tocar el archivo.
-
-`.env` está en `.gitignore`: no se sube al repositorio. Para crear uno nuevo, copia la plantilla `.env.example`.
-
-Antes de arrancar, aplica `backend/src/main/resources/db/postgresql/BD-Desarrollo web.sql` en una base nueva o `backend/src/main/resources/db/postgresql/migracion_soft_delete_postgresql.sql` en una base existente. El runtime usa `spring.jpa.hibernate.ddl-auto=validate`.
-
----
-
-## Ejecución
-
-### Windows
+Compose levanta solo la base y aplica el esquema al inicializar un volumen vacío. Para PostgreSQL instalado directamente o una base existente, sigue los comandos y las precauciones de [instalación](docs/08_INSTALACION_OPERACION.md).
 
 ```powershell
 .\mvnw.cmd spring-boot:run
 ```
 
-### Linux / macOS
+En Linux/macOS:
 
 ```bash
-chmod +x mvnw
-./mvnw spring-boot:run
+sh ./mvnw spring-boot:run
 ```
 
-Abre `http://localhost:8080` e inicia sesión con uno de los usuarios de demostración.
+Abre [la aplicación local](http://localhost:8080). Las claves demo están en el sembrador del repositorio y se destinan exclusivamente a desarrollo. Desactivar la carga demo no elimina ni cambia cuentas ya creadas.
 
----
+## 5. Configuración y base de datos
 
-## Pruebas
+[application.properties](backend/src/main/resources/application.properties) importa el archivo `.env` de la raíz. Las variables reales del proceso tienen precedencia sobre los valores del archivo. No se deben versionar credenciales reales.
+
+| Variable | Valor por defecto | Uso |
+| --- | --- | --- |
+| `DB_HOST` | `localhost` | Servidor PostgreSQL |
+| `DB_PORT` | `5432` | Puerto de conexión y puerto publicado por Compose |
+| `DB_NAME` | `lambda_shield` | Base de datos |
+| `DB_USER` / `DB_PASSWORD` | `postgres` / `postgres` | Valores de desarrollo; cambiar al desplegar |
+| `DEMO_DATA_ENABLED` | `false` | Crear los fixtures demo originales al arrancar |
+| `DEMO_DATASET_ENABLED` | `false` | Cargar ocho cuentas adicionales y 128 operaciones históricas, sin duplicarlas |
+| `SESSION_COOKIE_SECURE` | `false` | Activar en un despliegue exclusivamente HTTPS |
+| `LOGIN_RATE_LIMIT` | `10` | Intentos de login por IP y minuto |
+| `API_RATE_LIMIT` | `120` | Peticiones API por identidad y minuto |
+| `API_WRITE_RATE_LIMIT` | `40` | Escrituras API por identidad y minuto |
+
+El servidor usa `ddl-auto=validate`: valida el esquema, no lo crea ni migra automáticamente.
+
+- Base nueva: [esquema canónico](backend/src/main/resources/db/postgresql/BD-Desarrollo%20web.sql).
+- Base existente: [migración idempotente](backend/src/main/resources/db/postgresql/migracion_soft_delete_postgresql.sql) y después [contactos y notificaciones](backend/src/main/resources/db/postgresql/migracion_contactos_notificaciones.sql).
+
+La migración incluye las copias históricas `maximo_aplicado`, `etiqueta_aplicada` y `version_aplicada` de cada factor. El backfill toma el catálogo disponible al migrar; no puede reconstruir configuraciones anteriores que nunca se guardaron.
+
+## 6. Pantallas y acceso
+
+| Ruta | Pantalla | Acceso |
+| --- | --- | --- |
+| `GET /login` | Formulario de acceso | Público |
+| `/` | Dashboard | ADMIN y ANALISTA |
+| `/transacciones` | Historial y detalle | ADMIN y ANALISTA |
+| `/reglas` | Catálogo consultable | ADMIN y ANALISTA |
+| `/reportes` | Filtros, resumen y exportaciones | ADMIN y ANALISTA |
+| `/simulador` | Evaluación manual y tráfico demo | ADMIN |
+| `/usuarios` | Gestión de usuarios | ADMIN |
+| `/operacion` | Portal de cuenta y operaciones | CLIENTE; ADMIN también está autorizado, pero sin cliente asociado puede ver una vista vacía |
+
+`POST /login` y `POST /logout` los procesa Spring Security. El cierre de sesión efectivo requiere POST y CSRF. Mostrar u ocultar botones no sustituye los controles del servidor.
+
+## 7. APIs y seguridad
+
+Las APIs viven bajo `/api/v1`. Se autentican con sesión HTTP, no con JWT, API keys ni HTTP Basic. Una ruta nueva queda denegada hasta declararla en la política.
+
+| Familia | Función | Roles |
+| --- | --- | --- |
+| `/evaluation` | Crear, listar, desactivar y reactivar evaluaciones | ADMIN; CLIENTE solo crea para su cliente; ANALISTA solo lee |
+| `/metric` | KPIs, resumen financiero y movimientos | ADMIN y ANALISTA |
+| `/rule` | Consultar reglas activas | ADMIN y ANALISTA |
+| `/report/export` | Exportar evaluaciones filtradas | ADMIN y ANALISTA |
+| `/user` | Gestión de usuarios | ADMIN |
+
+Las escrituras exigen CSRF incluso durante login y logout. Los tokens se integran mediante Thymeleaf y `auth.js`. Las sesiones se revalidan contra la base: bloquear/eliminar usuarios o cambiar su clave revoca el acceso en la siguiente petición admitida por los límites.
+
+Respuestas habituales: `401` sin identidad válida, `403` por permisos o CSRF, `400` por validación, `404` por una entidad ausente y `429` por exceso de solicitudes. Los formatos de error difieren entre filtros y validaciones; consulta la [referencia completa](docs/07_API_REST.md).
+
+Para producción: HTTPS, `SESSION_COOKIE_SECURE=true`, credenciales propias y carga demo desactivada. Las sesiones y los límites viven en memoria por instancia; no constituyen una configuración de alta disponibilidad distribuida.
+
+## 8. Reglas y consistencia financiera
+
+| Puntaje | Nivel | Decisión | Estado de transacción | Saldo |
+| --- | --- | --- | --- | --- |
+| 0–29 | BAJO | APROBAR | APROBADA | Se aplica el movimiento |
+| 30–59 | MEDIO | MONITOREAR | APROBADA | Se aplica el movimiento |
+| 60–79 | ALTO | RETENER | RETENIDA | Sin movimiento |
+| 80–100 | CRITICO | BLOQUEAR | BLOQUEADA | Sin movimiento |
+
+El catálogo controla activación y peso; las implementaciones Java calculan la señal relativa. Se guardan puntajes, motivos y copias de etiqueta, máximo y versión. Desactivar revierte el movimiento cuando lo hubo; reactivar restaura el estado derivado del nivel guardado, sin ejecutar otra vez el motor.
+
+El dashboard financiero incluye únicamente transacciones `APROBADA`. Los KPIs de riesgo cuentan evaluaciones activas, incluidas retenidas y bloqueadas: son métricas distintas. `days=7` significa hoy más los siete días anteriores, es decir, ocho fechas.
+
+## 9. Pruebas y CI
 
 ```powershell
 .\mvnw.cmd clean test
+node --test frontend/tests/*.test.cjs
 ```
 
-Las pruebas usan **H2 en modo PostgreSQL**, con `ddl-auto=create-drop`, por lo que **no requieren una instancia de PostgreSQL**. Son 81 pruebas en diez grupos:
+La última ejecución disponible registra **137 verificaciones Java** y **23 pruebas JavaScript**, sin fallos. Java se ejecutó localmente con JDK 24 compilando para Java 21; CI configura JDK 21 y Node.js 22. Los conteos son una referencia del estado documentado, no un mínimo de cobertura obligatorio.
 
-- `domain.fraud.rule.ReglasFraudeTest`: valores límite de las ocho reglas;
-- `application.service.DeteccionFraudeServiceTest`: umbrales del motor de detección;
-- `presentation.api.rest.SeguridadApiMockMvcTest`: autenticación, autorización por rol, baja lógica con `PATCH`, reactivación, listado con desactivadas, rechazo de `DELETE` y aislamiento del portal del cliente;
-- `presentation.api.rest.ValidacionApiMockMvcTest`: validación de cada campo y parámetro de la API, JSON malformado, tipos incorrectos y `Content-Type` no soportado;
-- `presentation.api.rest.UsuarioApiMockMvcTest`: CRUD de usuarios, unicidad, cambio de clave, protección del último administrador y permisos;
-- `presentation.api.rest.ReporteApiMockMvcTest`: exportación CSV/Excel/PDF, filtros por fecha, nivel y cliente, y validación del formato;
-- `presentation.api.rest.DashboardApiMockMvcTest`: cifras reales del resumen, serie diaria y movimientos recientes;
-- `presentation.api.rest.PortalClienteApiMockMvcTest`: tipo de destinatario derivado del historial, descuento de saldo, rechazo por saldo insuficiente y bloqueos sin movimiento de dinero;
-- `presentation.api.rest.SaludMockMvcTest`: `/actuator/health` público y sin detalles; el resto de Actuator no expuesto;
-- `architecture.ArquitecturaCapasTest`: las seis reglas de ArchUnit (capas, dominio sin Spring, aplicación sin web, controladores en `presentation`, sin acceso a repositorios desde controladores y sin ciclos).
+Las pruebas Java usan H2 en modo PostgreSQL y no necesitan una instancia PostgreSQL. Incluyen seguridad, CSRF, concurrencia, importes exactos, consultas por lote y arquitectura. El reporte de cobertura se genera en `target/site/jacoco/index.html`.
 
-Si una carpeta está sincronizada con OneDrive, `clean` puede fallar por bloqueos de archivos; basta con `.\mvnw.cmd test`.
+[CI](.github/workflows/ci.yml) ejecuta ambos grupos en pull requests y pushes a `main`. No despliega la aplicación ni prueba una base PostgreSQL real. Los alcances y límites de validación se describen en [pruebas y calidad](docs/09_PRUEBAS_CALIDAD.md).
 
----
+## 10. Alcance actual
 
-## API REST
+Se conservan las 18 entidades del esquema académico y se incorpora `NotificacionUsuario` (19 entidades). Alertas, casos, historial de casos, auditoría y características no tienen un flujo completo de aplicación. Los avisos del portal se persisten por usuario para bloqueos y retenciones, con estado de lectura independiente. No sustituyen la entidad de alerta formal ni un caso de investigación.
 
-| Método | Endpoint | Descripción | Roles | Códigos |
-| :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/evaluation` | Evalúa y persiste una transacción | ADMIN, CLIENTE (forzado a su propio código) | 200, 400, 401, 403, 404, 415 |
-| `GET` | `/api/v1/evaluation` | Lista evaluaciones activas (`?activas=false` incluye las desactivadas) | ADMIN, ANALISTA | 200, 401, 403 |
-| `PATCH` | `/api/v1/evaluation/{id}` | Desactiva una evaluación (baja lógica) | ADMIN | 204, 400, 401, 403, 404 |
-| `PATCH` | `/api/v1/evaluation/{id}/activar` | Reactiva una evaluación dada de baja | ADMIN | 204, 400, 401, 403, 404 |
-| `GET` | `/api/v1/metric` | KPIs consolidados | ADMIN, ANALISTA | 200, 401, 403 |
-| `GET` | `/api/v1/metric/summary?days={n}` | Balance contable del periodo | ADMIN, ANALISTA | 200, 400, 401, 403 |
-| `GET` | `/api/v1/metric/movement?days={n}` | Serie temporal para el gráfico | ADMIN, ANALISTA | 200, 400, 401, 403 |
-| `GET` | `/api/v1/metric/recent?days={n}` | Movimientos recientes | ADMIN, ANALISTA | 200, 400, 401, 403 |
-| `GET` | `/api/v1/rule` | Reglas activas desde la base de datos | ADMIN, ANALISTA | 200, 401, 403 |
-| `GET` | `/api/v1/report/export?formato={csv\|xlsx\|pdf}` | Reporte con filtros `desde`, `hasta`, `nivel`, `cliente` | ADMIN, ANALISTA | 200, 400, 401, 403 |
-| `GET` | `/api/v1/user` | Lista de usuarios del sistema | ADMIN | 200, 401, 403 |
-| `GET` | `/api/v1/user/{id}` | Usuario por identificador | ADMIN | 200, 400, 401, 403, 404 |
-| `POST` | `/api/v1/user` | Alta de usuario (rol, clave BCrypt y cliente asociado) | ADMIN | 201, 400, 401, 403 |
-| `PATCH` | `/api/v1/user/{id}` | Actualiza nombres, correo, estado, rol y cliente | ADMIN | 200, 400, 401, 403, 404 |
-| `PATCH` | `/api/v1/user/{id}/clave` | Cambia la clave del usuario | ADMIN | 204, 400, 401, 403, 404 |
-| `DELETE` | `/api/v1/user/{id}` | Baja física de una cuenta y sus roles | ADMIN | 204, 400, 401, 403, 404 |
-
-Validaciones de entrada:
-
-| Endpoint | Campo / parámetro | Regla |
-| :--- | :--- | :--- |
-| `POST /api/v1/evaluation` | `cliente` | Obligatorio; 1-20 letras, números o guiones |
-| | `monto` | Mayor que cero; hasta 16 enteros y 2 decimales |
-| | `categoria` | Opcional; letras y `_`, máximo 40 caracteres (vacío = `otros`) |
-| | `hora` | 0-23 |
-| | `pais`, `dispositivo`, `ip` | Obligatorios; sólo los valores permitidos del simulador |
-| | `beneficiario` | Opcional (`recurrente`/`nuevo`); el portal del cliente lo deriva del historial |
-| | `beneficiarioNombre` | Opcional; hasta 150 caracteres. Identifica al destinatario y con él se deriva el tipo |
-| | `operacionesUltimaHora` | 0-1000 |
-| `PATCH /api/v1/evaluation/{id}` | `id` | Número entero positivo |
-| `GET /api/v1/metric/*` | `days` | 1-365 (rango máximo del dashboard) |
-
-Códigos de error relevantes:
-
-- `400`: validación fallida, JSON malformado, cuerpo ausente, parámetro con tipo incorrecto o parámetro obligatorio ausente. Siempre responde `{"errores":[...]}`.
-- `401`: sesión ausente.
-- `403`: rol sin permiso.
-- `404`: cliente o evaluación inexistente.
-- `405`: método no permitido, por ejemplo `DELETE`.
-- `415`: `Content-Type` distinto de `application/json`.
-
-### Páginas MVC (fuera de la API)
-
-Rutas Thymeleaf servidas por `presentation/web`. No son endpoints REST: devuelven HTML, no JSON.
-
-| Ruta | Controlador | Roles | Descripción |
-| :--- | :--- | :--- | :--- |
-| `/` | `DashboardController` | ADMIN, ANALISTA | Panel general con resumen y movimientos |
-| `/login`, `/logout` | `LoginController` | Públicas | Autenticación y cierre de sesión |
-| `/operacion` | `OperacionClienteController` | CLIENTE | Banca en línea del cliente autenticado |
-| `/transacciones` | `TransaccionViewController` | ADMIN, ANALISTA | Historial de evaluaciones y KPIs |
-| `/reglas` | `ReglaViewController` | ADMIN, ANALISTA | Catálogo de reglas del motor |
-| `/reportes` | `ReporteController` | ADMIN, ANALISTA | Reportes con filtros y exportación CSV/Excel/PDF |
-| `/simulador` | `SimuladorViewController` | ADMIN | Simulador manual de transacciones |
-| `/usuarios` | `UsuarioViewController` | ADMIN | Gestión de usuarios (CRUD) |
-
-Un ANALISTA que intente abrir `/operacion`, `/simulador` o `/usuarios` se redirige a `/`; un CLIENTE que intente cualquier página distinta de `/operacion` se redirige a `/operacion`. La política vive en `presentation/security/AuthorizationPolicy`.
-
----
-
-## Codificación de archivos
-
-Todo el código y los recursos son **UTF-8 sin BOM**, con finales de línea CRLF en Windows (`.gitattributes` mantiene `mvnw` en LF). El `pom.xml` fija `project.build.sourceEncoding=UTF-8` y `project.reporting.outputEncoding=UTF-8`, de modo que `javac` interpreta los acentos igual con JDK 17 o superior, sin depender del *default charset* de la máquina. En tiempo de ejecución, `server.servlet.encoding.charset=UTF-8` con `force=true` garantiza que las respuestas HTTP declaren UTF-8.
-
----
-
-## Operación y calidad
-
-**Base de datos local con Docker** (opcional, en lugar de instalar PostgreSQL):
-
-```powershell
-docker compose up -d
-```
-
-`docker-compose.yml` levanta PostgreSQL 18 con las variables de `.env` y aplica el esquema canónico solo la primera vez, cuando el volumen está vacío. Para reaplicarlo: `docker compose down -v`. Si ya tienes PostgreSQL en el puerto 5432, define `DB_PORT=5433` en `.env`.
-
-**Salud de la aplicación:** `GET /actuator/health` responde `{"status":"UP"}` sin sesión y sin detalles de la base de datos. El resto de endpoints de Actuator no están expuestos.
-
-**Cobertura:** `.\mvnw.cmd test` genera el reporte JaCoCo en `target/site/jacoco/index.html`.
-
-**Integración continua:** `.github/workflows/ci.yml` ejecuta las pruebas con JDK 21 en cada push a `main` y en cada pull request, y publica el reporte de cobertura como artefacto.
-
----
-
-## Documentación del proyecto
-
-- `README.md` — este documento: arquitectura, API, páginas, esquema y pruebas.
-- `docs/` — documentación técnica detallada (arquitectura, funcionalidades, reglas, consultas JPA, valor de negocio).
-- `CUMPLIMIENTO_TAREAS.md` — informe de cumplimiento por tarea (seguridad, sesión, roles, aislamiento, persistencia y baja lógica).
-- `Instrucciones.MD` — consigna original del trabajo.
-
----
-
-## Tecnologías
-
-- Java 21 LTS
-- Spring Boot 4.1.1 (Web MVC, Data JPA, Validation)
-- Thymeleaf
-- Spring Security Crypto (BCrypt)
-- PostgreSQL 18
-- H2 (solo pruebas)
-- Bootstrap 5.3, Bootstrap Icons, Chart.js
-- JUnit 5, MockMvc, AssertJ
-- Maven Wrapper
-
----
-
-© 2026 **Lambda Shield** - Proyecto académico de detección de fraude bancario.
+El país es declarado, la huella de dispositivo es una normalización del User-Agent y RF007 no mide distancias reales. No hay MFA, notificaciones externas, reconciliación bancaria ni evidencia de cumplimiento regulatorio. Las limitaciones y futuras mejoras están separadas de lo implementado en [valor de negocio](docs/05_VALOR_NEGOCIO.md).

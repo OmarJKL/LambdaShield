@@ -1,8 +1,6 @@
 package com.lambdashield.fraude.application.service;
 
-import com.lambdashield.fraude.domain.device.DeviceFingerprint;
 import com.lambdashield.fraude.domain.entity.Cliente;
-import com.lambdashield.fraude.domain.entity.Dispositivo;
 import com.lambdashield.fraude.repository.ClienteRepository;
 import com.lambdashield.fraude.repository.DispositivoRepository;
 import com.lambdashield.fraude.repository.TransaccionRepository;
@@ -13,13 +11,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ClienteContextService {
 
+    private final DispositivoService dispositivos;
     private final ClienteRepository clienteRepository;
     private final DispositivoRepository dispositivoRepository;
     private final TransaccionRepository transaccionRepository;
 
-    public ClienteContextService(ClienteRepository clienteRepository,
+    public ClienteContextService(DispositivoService dispositivos, ClienteRepository clienteRepository,
                                  DispositivoRepository dispositivoRepository,
                                  TransaccionRepository transaccionRepository) {
+        this.dispositivos = dispositivos;
         this.clienteRepository = clienteRepository;
         this.dispositivoRepository = dispositivoRepository;
         this.transaccionRepository = transaccionRepository;
@@ -27,16 +27,7 @@ public class ClienteContextService {
 
     @Transactional(readOnly = true)
     public boolean esDispositivoConocido(String codigoCliente, String userAgent) {
-        if (codigoCliente == null || userAgent == null || userAgent.isBlank()) return false;
-        return clienteRepository.findByCodigoCliente(codigoCliente)
-                .map(cliente -> {
-                    String buscada = DeviceFingerprint.from(codigoCliente, DeviceFingerprint.normalize(userAgent));
-                    return dispositivoRepository.findByCliente_IdClienteAndEsConocidoTrue(cliente.getIdCliente())
-                            .stream()
-                            .map(Dispositivo::getHuellaDispositivo)
-                            .anyMatch(buscada::equals);
-                })
-                .orElse(false);
+        return dispositivos.esConocido(codigoCliente, userAgent);
     }
 
     @Transactional(readOnly = true)

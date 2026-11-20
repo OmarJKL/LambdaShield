@@ -127,4 +127,12 @@ ALTER TABLE auditoria
 ALTER TABLE caracteristica_transaccion
     ALTER COLUMN id_transaccion DROP IDENTITY IF EXISTS;
 
+ALTER TABLE evaluacion_regla ADD COLUMN IF NOT EXISTS maximo_aplicado INTEGER;
+ALTER TABLE evaluacion_regla ADD COLUMN IF NOT EXISTS etiqueta_aplicada VARCHAR(150);
+ALTER TABLE evaluacion_regla ADD COLUMN IF NOT EXISTS version_aplicada INTEGER;
+UPDATE evaluacion_regla e
+SET maximo_aplicado = r.peso::integer, etiqueta_aplicada = r.nombre_regla, version_aplicada = r.version_regla
+FROM regla_fraude r
+WHERE e.id_regla = r.id_regla AND e.maximo_aplicado IS NULL;
+
 COMMIT;

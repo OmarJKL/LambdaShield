@@ -1,81 +1,190 @@
-# Lambda Shield — Funcionalidades de negocio y flujos
+# 02 — Funcionalidades, pantallas y flujos
 
-## 1. Objetivo del negocio
+[Índice](README.md) · [Reglas](03_REGLAS_ANTIFRAUDE.md) · [API](07_API_REST.md)
 
-Lambda Shield protege operaciones bancarias en tiempo real: cada transferencia se evalúa antes de ejecutarse, asigna un puntaje de riesgo (0–100) y decide si se aprueba, monitorea, retiene o bloquea. El sistema conserva el historial para auditoría y permite desactivar evaluaciones sin borrarlas.
+## 1. Objetivo y alcance
 
-## 2. Roles y casos de uso
+Cada operación se evalúa antes de aplicar su efecto en la cuenta local. El resultado combina un puntaje de 0 a 100, un nivel de riesgo y factores explicativos. Los usuarios autorizados pueden consultar el historial y generar reportes.
 
-| Rol | Casos de uso principales |
-| :--- | :--- |
-| CLIENTE | Consultar saldo, transferir con evaluación antifraude, ver sus operaciones y avisos de seguridad |
-| ANALISTA | Monitorear evaluaciones, consultar reglas, generar reportes |
-| ADMIN | Todo lo anterior, más simulador manual, gestión de usuarios y baja lógica de evaluaciones |
+El proyecto simula operaciones bancarias en una base de datos. Un beneficiario es un registro descriptivo; aprobar una operación no acredita una cuenta receptora ni ejecuta una transferencia interbancaria real.
 
-## 3. Flujos de negocio
+## 2. Roles e identidad
 
-### 3.1 Login
+| Rol | Capacidades de interfaz |
+| --- | --- |
+| CLIENTE | Cuenta, saldo, formulario de operación, historial propio y avisos |
+| ANALISTA | Dashboard, historial, catálogo y reportes |
+| ADMIN | Administración, simulador, usuarios, desactivación y reactivación |
 
-1. El usuario envía credenciales a `POST /login`.
-2. `AuthService` valida contra `usuario_sistema` con BCrypt y resuelve el rol desde `usuario_rol`/`rol`.
-3. Se renueva el identificador de sesión (`changeSessionId`).
-4. Se guardan en sesión `usuario`, `nombreUsuario`, `rol` y `codigoCliente`.
-5. `CLIENTE` redirige a `/operacion`; los demás a `/`.
+`UsuarioSistema` identifica a quien inicia sesión. `Cliente` identifica al titular bancario y se vincula mediante `usuario_sistema.id_cliente`. Puede haber varios usuarios relacionados con un mismo cliente. Si una identidad tiene varios roles activos, prevalece ADMIN, luego ANALISTA y finalmente CLIENTE; sin ninguno se rechaza el acceso.
 
-### 3.2 Transferencia del cliente (portal)
+## 3. Acceso y cierre de sesión
 
-1. El cliente completa el formulario (monto, categoría, país, destinatario). El servidor deriva hora, frecuencia, dispositivo e IP.
-2. `POST /api/v1/evaluation` fuerza el `codigoCliente` de la sesión.
-3. Se obtiene el promedio de gasto del cliente y el saldo de la cuenta principal.
-4. El motor evalúa las ocho reglas y produce puntaje, nivel (`bajo/medio/alto/critico`) y decisión.
-5. Si la operación es aprobada (bajo/medio): se valida el saldo, se descuenta el monto y se registran `saldo_anterior`/`saldo_posterior`.
-6. Se persiste la transacción, la evaluación y cada factor aplicado.
-7. El tipo de destinatario (nuevo/frecuente) se deriva del historial real del cliente.
-8. La interfaz muestra recibo aprobado o preventivo, actualiza el saldo y prepende la fila al historial. Si hay saldo insuficiente, se rechaza con `400`.
+1. `GET /login` muestra el formulario Thymeleaf e incluye un token CSRF.
+2. Spring Security procesa `POST /login` con los campos `usuario`, `clave` y el token.
+3. `AuthService` normaliza el usuario, comprueba BCrypt, estado activo y rol disponible.
+4. Se renueva el identificador de sesión y se almacena un contexto de seguridad autenticado.
+5. CLIENTE se redirige a `/operacion`; los demás roles, a `/`.
+6. En posteriores peticiones se vuelve a comprobar la identidad y se actualizan rol y vínculo de cliente.
+7. El formulario `POST /logout`, protegido por CSRF, invalida la sesión y elimina la cookie de sesión.
 
-### 3.3 Simulador del administrador
+Un login fallido redirige a `/login?error`; no se revela si el usuario existe. Un exceso de intentos puede responder `429`. No hay registro público, recuperación de clave por correo ni MFA.
 
-Igual que el portal, pero los factores se declaran manualmente y no se fuerza el cliente. Útil para probar el motor con valores arbitrarios.
+## 4. Pantallas actuales
 
-### 3.4 Historial y baja lógica
+### 4.1 Portal de operación — `/operacion`
 
-1. `GET /api/v1/evaluation` lista las evaluaciones activas.
-2. `PATCH /api/v1/evaluation/{id}` marca `es_activa = false`, registra `fecha_desactivacion` y deja la transacción en `REVERSADA`.
-3. Si la operación estaba aprobada, se devuelve el monto a la cuenta.
-4. `PATCH /api/v1/evaluation/{id}/activar` revierte la baja y restaura el estado de la transacción (con revalidación de saldo).
-5. `GET /api/v1/evaluation?activas=false` incluye las desactivadas.
+El controlador prepara los datos del cliente de la sesión autenticada: número de cuenta, saldo, evaluaciones activas propias y agenda de beneficiarios con número de cuenta. Sin un cliente asociado no se usa un historial global como respaldo.
 
-### 3.5 Dashboard y reportes
+El formulario permite elegir un contacto guardado o introducir destinatario, banco y número de cuenta, además de monto, categoría y país declarado. JavaScript envía el contrato completo que exige la API, aunque el servidor reemplaza varias señales para CLIENTE.
 
-- El dashboard agrega saldo de cuentas activas, ingresos/egresos del periodo y variaciones frente al periodo anterior.
-- La serie diaria y los últimos movimientos se calculan desde las transacciones reales.
-- Los reportes permiten filtrar por fecha de evaluación, nivel y cliente, y exportar en CSV, Excel y PDF.
+Tras una respuesta correcta, la página muestra un recibo, añade la operación al historial y sustituye el saldo visible por `saldoDisponible` devuelto por el servidor. Una retención o un bloqueo se registran como evaluaciones, pero no descuentan saldo. La vista del portal omite evaluaciones desactivadas.
 
-### 3.6 Gestión de usuarios (solo ADMIN)
+La campana muestra avisos persistentes de operaciones BLOQUEADA o RETENIDA. Incluye contador de pendientes, fecha relativa, detalle expandible, lectura individual y marcar todas como leídas. Consulta páginas de 20 elementos y se actualiza al abrir, al volver a la pestaña, después de una operación y cada 15 segundos si la pestaña está visible y la bandeja cerrada. La lectura pertenece al usuario, incluso si dos usuarios comparten cliente. No envía correo/SMS ni sustituye la investigación de casos.
 
-- Alta, edición, cambio de clave, cambio de rol/estado y baja física.
-- Protección del último administrador activo y de la cuenta propia.
+### 4.2 Dashboard — `/`
 
-## 4. Portal del cliente
+Thymeleaf entrega el resumen inicial y la tabla reciente. `panel.js` consulta las APIs para cambiar el periodo y actualizar gráfico, resumen y actividad. Los ingresos y egresos proceden solo de transacciones aprobadas.
 
-- Muestra saldo y número de cuenta reales.
-- Formulario de transferencia sin selector de tipo de destinatario: el sistema lo deriva.
-- Historial solo de sus operaciones con estado diferenciado (procesada, monitoreo, retenida, bloqueada).
-- Avisos de seguridad para operaciones de riesgo alto o crítico, con el detalle de las causas detectadas.
-- Si una transferencia es bloqueada o retenida, el recibo explica los factores.
+El saldo es la suma actual de cuentas activas. Las variaciones de ingresos/egresos comparan dos rangos de igual longitud; la variación de saldo usa una estimación de saldo inicial, no un saldo histórico auditado. Ver la sección 8.
 
-## 5. Entidades del dominio
+### 4.3 Transacciones — `/transacciones`
 
-| Entidad | Tabla | Descripción |
-| :--- | :--- | :--- |
-| `Cliente` | `cliente` | Datos del cliente y promedio de gasto |
-| `Cuenta` | `cuenta` | Cuenta principal y saldo disponible |
-| `Dispositivo` | `dispositivo` | Huella del dispositivo y si es conocido |
-| `Beneficiario` | `beneficiario` | Destinatario y si es conocido |
-| `Transaccion` | `transaccion` | Operación con montos, saldos y ubicación |
-| `EvaluacionFraude` | `evaluacion_fraude` | Puntaje, nivel, decisión y estado activo |
-| `EvaluacionRegla` | `evaluacion_regla` | Desglose de cada regla aplicada |
-| `ReglaFraude` | `regla_fraude` | Catálogo de reglas y pesos |
-| `UsuarioSistema` | `usuario_sistema` | Usuarios y hash BCrypt |
-| `Rol` / `UsuarioRol` | `rol` / `usuario_rol` | Roles y asignaciones |
-| `AlertaFraude`, `CasoFraude`, `HistorialCaso`, `Auditoria`, `CaracteristicaTransaccion` | — | Mapeadas al esquema; pendientes de servicio |
+JavaScript carga evaluaciones con `activas=false`, que significa incluir activas y desactivadas, y obtiene KPIs globales de evaluaciones activas.
+
+Permite filtrar localmente por nivel, monto, mes/año o desactivadas. También muestra factores y el historial del cliente dentro del conjunto cargado. El indicador «Total evaluado» suma montos de evaluaciones; no representa el saldo disponible de la cuenta.
+
+ADMIN dispone de desactivación y reactivación mediante confirmación. ANALISTA consulta sin poder modificar. Los filtros locales no cambian automáticamente el ámbito de los KPIs globales.
+
+### 4.4 Catálogo de reglas — `/reglas`
+
+Muestra reglas activas leídas de la base: código, nombre, descripción y peso máximo configurado. No ofrece edición de reglas ni hay un CRUD REST de catálogo. Cambiar pesos en BD requiere un procedimiento administrativo externo a esta interfaz.
+
+### 4.5 Simulador — `/simulador`
+
+Solo ADMIN. Thymeleaf entrega el selector de clientes y sus promedios. El administrador declara las señales de riesgo y envía la operación al mismo caso de uso persistente.
+
+El resultado incluye puntaje, estado, desglose y gráfico de factores. El tráfico automático genera escenarios periódicos. El generador actual usa los códigos demo C-001, C-002 y C-003; no debe asumirse compatible con cualquier base sin esos fixtures.
+
+**Tiene efectos reales en la base local:** crea evaluaciones, modifica saldos cuando corresponde y consume límites API. No es un modo de cálculo sin persistencia.
+
+### 4.6 Reportes — `/reportes`
+
+El servidor aplica filtros de fecha de evaluación, nivel y código de cliente; entrega la tabla y su resumen. JavaScript sincroniza enlaces para exportar los mismos filtros a CSV, XLSX o PDF.
+
+Solo se incluyen evaluaciones activas. El intervalo de fechas incluye ambos días; `desde` posterior a `hasta` se rechaza. La consulta no está paginada y los exportadores construyen el archivo en memoria.
+
+### 4.7 Usuarios — `/usuarios`
+
+Solo ADMIN. La interfaz consume la API para listar, crear, editar, cambiar claves y eliminar usuarios.
+
+- Usuario y correo deben ser únicos según las comprobaciones del servicio y las restricciones del esquema.
+- El nombre de usuario se normaliza al crear; el contrato de edición no lo cambia.
+- Un usuario nuevo se crea ACTIVO.
+- CLIENTE requiere un código de cliente existente; crear el usuario no crea la entidad bancaria.
+- Cambiar rol o estado no debe dejar al sistema sin otro administrador activo.
+- No se puede eliminar al usuario que realiza la acción.
+- La eliminación es física e incluye sus asignaciones de rol; otras referencias de BD pueden impedirla.
+- Cambiar clave, bloquear o eliminar hace que las sesiones anteriores pierdan acceso en la siguiente petición admitida.
+
+La protección de la cuenta propia se refiere a la eliminación. No significa que todas las modificaciones del propio perfil estén prohibidas.
+
+## 5. Creación de una operación
+
+### 5.1 Entrada y derivación
+
+Para ADMIN se aceptan señales manuales dentro del contrato validado. Para CLIENTE:
+
+| Dato | Fuente efectiva |
+| --- | --- |
+| Cliente | Vínculo de la identidad revalidada; el body no elige otro cliente |
+| Hora | Reloj del servidor |
+| Frecuencia | Evaluaciones activas de ese cliente en la última hora |
+| Dispositivo | Comparación de User-Agent normalizado con registros conocidos |
+| IP | Dirección de conexión comparada con historial y dispositivos |
+| Tipo de beneficiario | Con cuenta, se resuelve por titular y número; sin cuenta se conserva el modo por nombre/genérico |
+| Monto, categoría y país | Declarados por el formulario |
+
+La validación del DTO ocurre antes de sustituir las señales. Por ello el cliente HTTP debe enviar valores de formato válido también en los campos que después serán derivados.
+
+### 5.2 Coordinación transaccional
+
+1. Buscar el cliente y la primera cuenta por ID; exigir que esa cuenta esté activa.
+2. Bloquear la cuenta para escribir.
+3. Resolver/crear referencias de tipo, canal, dispositivo y beneficiario.
+4. Ejecutar reglas y aplicar el catálogo vigente.
+5. Sumar factores con tope 100 y determinar nivel, decisión y estado.
+6. Aplicar el movimiento solo si el estado es APROBADA.
+7. Guardar transacción, evaluación y factores en la misma transacción.
+8. Responder con el resultado y el saldo actual de la cuenta.
+
+Si ocurre un error, se revierten las escrituras de esa transacción. Un rechazo por saldo insuficiente no se guarda como una evaluación nueva completada.
+
+## 6. Estados, saldo y precisión
+
+| Nivel | Decisión | Estado persistido | Movimiento |
+| --- | --- | --- | --- |
+| BAJO | APROBAR | APROBADA | Se aplica |
+| MEDIO | MONITOREAR | APROBADA | Se aplica |
+| ALTO | RETENER | RETENIDA | No se aplica |
+| CRITICO | BLOQUEAR | BLOQUEADA | No se aplica |
+
+`MovimientoSaldoService` suma créditos y resta débitos; un reverso aplica el signo contrario. Los tipos creados por defecto para las operaciones de formulario son débitos. Una retención no descuenta ni reserva una cantidad del saldo.
+
+Los importes de cuenta, operación, resultados y agregados financieros usan `BigDecimal`. El scoring relativo usa `double`, y la interfaz utiliza números JavaScript para presentación. Esto no equivale a precisión decimal arbitraria en todo navegador.
+
+El texto `estado` de la respuesta HTTP es una etiqueta según riesgo. Para distinguir una evaluación desactivada se debe consultar también `activa`; el estado interno de su transacción es REVERSADA.
+
+## 7. Desactivación y reactivación
+
+### Desactivar
+
+`PATCH /api/v1/evaluation/{id}` bloquea la evaluación y después su cuenta. Si estaba aprobada se aplica el reverso; luego se marca `es_activa=false`, se registra fecha de desactivación y la transacción queda REVERSADA.
+
+Desactivar una retenida o bloqueada no devuelve dinero porque no lo había descontado. Repetir la desactivación de una evaluación ya inactiva devuelve `404`, sin otro reverso.
+
+### Reactivar
+
+`PATCH /api/v1/evaluation/{id}/activar` restaura el estado correspondiente al nivel guardado. No recalcula el riesgo con reglas actuales. Si vuelve a APROBADA, reaplica el movimiento y actualiza los saldos anterior/posterior registrados; puede fallar por saldo insuficiente.
+
+Reactivar una evaluación que ya está activa devuelve `400`. Los bloqueos impiden que acciones simultáneas sobre la misma evaluación dupliquen su efecto financiero. No existe una clave de idempotencia para reintentos de creación de nuevas operaciones.
+
+## 8. Lectura correcta de indicadores
+
+| Indicador | Fuente y significado |
+| --- | --- |
+| Total de evaluaciones | Conteo de evaluaciones activas |
+| Aprobadas del KPI | Nivel BAJO; MEDIO se cuenta aparte como monitoreadas |
+| En revisión / bloqueadas | Niveles ALTO / CRITICO |
+| Puntaje promedio | Media del score de evaluaciones activas |
+| Saldo del dashboard | Suma del saldo disponible de cuentas ACTIVA |
+| Ingresos/egresos | Montos de transacciones APROBADA por naturaleza y fecha de transacción |
+| Monto total del reporte | Suma de montos del conjunto filtrado de evaluaciones activas |
+| `montoBloqueado` del reporte | Suma de ALTO y CRITICO, aunque su nombre sugiera solo bloqueo |
+| Tasa de bloqueo del reporte | CRITICO / total × 100, no incluye ALTO en el numerador |
+
+El dashboard usa intervalos `[inicio del primer día, inicio del día siguiente al último)`. `days=n` abarca hoy y n días anteriores: `days=7` produce ocho puntos. Los periodos usan el reloj y zona del servidor.
+
+Para ingresos y egresos se compara con el rango anterior de la misma longitud. La variación se calcula como `(actual - anterior) / abs(anterior) × 100`, redondeada a una décima; si la base es cero se devuelve 0 cuando ambos son cero o 100 en otro caso.
+
+Para saldo, la base estimada es `saldoActual - ingresos + egresos`. No se usa un balance histórico independiente. Como una desactivación cambia el estado de la transacción original, puede cambiar totales de un periodo pasado; no se registra un asiento separado de reverso en la fecha de desactivación.
+
+## 9. Capacidades que no están implementadas
+
+No hay acreditación externa, reserva de fondos retenidos, aprobación manual posterior de una retención, administración de reglas desde la interfaz, investigación de casos, auditoría completa de acciones, notificaciones externas, MFA ni recuperación de contraseña.
+
+Las tablas previstas para esas áreas no significan que exista su flujo de negocio. Estas distinciones se amplían en [valor de negocio](05_VALOR_NEGOCIO.md).
+
+### Consulta del titular por número de cuenta
+
+El portal pide banco y cuenta antes del titular. Al escribir o pegar una cuenta Lambda Shield, espera 350 ms y consulta el titular; también consulta al salir del campo y antes de enviar. El nombre interno es de solo lectura. Cambiar cuenta o banco limpia el nombre anterior, y una respuesta de una consulta anterior no puede sobrescribir el destinatario actual. Una cuenta inexistente, inactiva o propia no se admite. Elegir un contacto utiliza el mismo flujo.
+
+Para otros bancos solo se completan los datos de contactos guardados; si el destinatario es nuevo, el nombre se escribe manualmente y la pantalla informa que no verifica la titularidad externa. La aplicación no dispone de una conexión con sus directorios bancarios.
+
+## Asistente IA para definiciones
+
+En `/reglas`, ADMIN puede completar condiciones tipadas y obtener interpretación, advertencias, sugerencias y casos propuestos de OpenRouter. El borrador se puede descargar, pero no se publica ni se conserva en BD. Las ocho reglas vigentes continúan evaluando las operaciones. [Configuración y límites](12_ASISTENTE_REGLAS_IA.md).
+
+### Activación de reglas
+
+En `/reglas` se muestran tanto reglas activas como inactivas. ADMIN puede activar o desactivar cada regla; ANALISTA solo consulta. El estado se conserva en BD y determina qué reglas aportan puntos y factores en las siguientes evaluaciones. Las evaluaciones anteriores conservan sus resultados. No requiere migración: se utiliza `regla_fraude.es_activa`.

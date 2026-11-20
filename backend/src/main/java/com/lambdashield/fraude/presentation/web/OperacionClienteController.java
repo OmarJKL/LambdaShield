@@ -15,15 +15,17 @@ import java.util.List;
 public class OperacionClienteController {
 
     private final ClienteService clienteService;
+    private final com.lambdashield.fraude.application.service.BeneficiarioConsultaService beneficiarios;
     private final EvaluacionConsultaService evaluacionConsultaService;
     private final EvaluacionResponseMapper mapper;
 
     public OperacionClienteController(ClienteService clienteService,
                                       EvaluacionConsultaService evaluacionConsultaService,
-                                      EvaluacionResponseMapper mapper) {
+                                      EvaluacionResponseMapper mapper, com.lambdashield.fraude.application.service.BeneficiarioConsultaService beneficiarios) {
         this.clienteService = clienteService;
         this.evaluacionConsultaService = evaluacionConsultaService;
         this.mapper = mapper;
+        this.beneficiarios = beneficiarios;
     }
 
     @GetMapping("/operacion")
@@ -37,6 +39,7 @@ public class OperacionClienteController {
                 : null;
 
         model.addAttribute("cliente", cliente);
+        model.addAttribute("beneficiarios", beneficiarios.listar(codigoCliente));
         model.addAttribute("codigoCliente", codigoCliente);
         model.addAttribute("nombreUsuario", nombreUsuario != null ? nombreUsuario : "Cliente");
         model.addAttribute("rol", session.getAttribute("rol"));
@@ -48,13 +51,6 @@ public class OperacionClienteController {
                 ? mapper.toResponses(evaluacionConsultaService.listarPorClienteCodigo(codigoCliente))
                 : List.of();
         model.addAttribute("transacciones", misTx);
-
-        // Avisos de seguridad: operaciones del propio cliente con riesgo alto o crítico.
-        List<EvaluacionResponse> avisos = misTx.stream()
-                .filter(tx -> "alto".equals(tx.nivel()) || "critico".equals(tx.nivel()))
-                .limit(5)
-                .toList();
-        model.addAttribute("avisos", avisos);
 
         return "cliente/operacion";
     }

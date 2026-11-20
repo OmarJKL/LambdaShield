@@ -12,14 +12,17 @@ import com.lambdashield.fraude.repository.ClienteRepository;
 import com.lambdashield.fraude.repository.RolRepository;
 import com.lambdashield.fraude.repository.UsuarioRolRepository;
 import com.lambdashield.fraude.repository.UsuarioSistemaRepository;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Sort.Direction;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Gestión de usuarios del sistema: alta, consulta, actualización, cambio de
@@ -36,25 +39,31 @@ public class UsuarioAdminService {
     private final RolRepository rolRepository;
     private final ClienteRepository clienteRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RolUsuarioService roles;
 
     public UsuarioAdminService(UsuarioSistemaRepository usuarioRepository,
                                UsuarioRolRepository usuarioRolRepository,
                                RolRepository rolRepository,
                                ClienteRepository clienteRepository,
-                               PasswordEncoder passwordEncoder) {
+                               PasswordEncoder passwordEncoder, RolUsuarioService roles) {
         this.usuarioRepository = usuarioRepository;
         this.usuarioRolRepository = usuarioRolRepository;
         this.rolRepository = rolRepository;
         this.clienteRepository = clienteRepository;
         this.passwordEncoder = passwordEncoder;
+        this.roles = roles;
     }
 
     @Transactional(readOnly = true)
     public List<UsuarioResumen> listar() {
-        return usuarioRepository.findAll().stream()
-                .map(this::toResumen)
-                .sorted((a, b) -> Long.compare(b.id(), a.id()))
-                .toList();
+        List<UsuarioSistema> usuarios = usuarioRepository.findAll(Sort.by(
+                Direction.DESC, "idUsuario"));
+        var codigos = roles.codigos(usuarios.stream().map(UsuarioSistema::getIdUsuario).toList());
+        var clientes = clienteRepository.findAllById(usuarios.stream().map(UsuarioSistema::getIdCliente)
+                .filter(Objects::nonNull).distinct().toList()).stream()
+                .collect(Collectors.toMap(Cliente::getIdCliente, Cliente::getCodigoCliente));
+        return usuarios.stream().map(u -> toResumen(u, codigos.getOrDefault(u.getIdUsuario(), "SIN_ROL"),
+                clientes.get(u.getIdCliente()))).toList();
     }
 
     @Transactional(readOnly = true)
@@ -86,7 +95,7 @@ public class UsuarioAdminService {
         UsuarioSistema usuario = obtener(idUsuario);
         validarUnicidad(null, command.correo(), idUsuario);
 
-        String rolAnterior = codigoRol(usuario.getIdUsuario());
+        String rolAnterior = roles.codigo(usuario.getIdUsuario());
         usuario.setNombres(command.nombres().trim());
         usuario.setCorreo(command.correo().trim().toLowerCase(Locale.ROOT));
         usuario.setEstadoUsuario(EstadoUsuario.valueOf(command.estado().toUpperCase(Locale.ROOT)));
@@ -121,7 +130,7 @@ public class UsuarioAdminService {
         if (usuario.getNombreUsuario().equals(usuarioActual)) {
             throw new IllegalArgumentException("No puedes eliminar tu propio usuario");
         }
-        if (ADMIN.equals(codigoRol(idUsuario)) && usuario.getEstadoUsuario() == EstadoUsuario.ACTIVO
+        if (ADMIN.equals(roles.codigo(idUsuario)) && usuario.getEstadoUsuario() == EstadoUsuario.ACTIVO
                 && contarOtrosAdministradoresActivos(idUsuario) == 0) {
             throw new IllegalArgumentException("No se puede eliminar al último administrador activo");
         }
@@ -144,13 +153,10 @@ public class UsuarioAdminService {
                     });
         }
         String correoNormalizado = correo.trim().toLowerCase(Locale.ROOT);
-        usuarioRepository.findAll().stream()
-                .filter(u -> u.getCorreo() != null && u.getCorreo().equalsIgnoreCase(correoNormalizado))
-                .filter(u -> idExcluido == null || !u.getIdUsuario().equals(idExcluido))
-                .findAny()
-                .ifPresent(u -> {
-                    throw new IllegalArgumentException("El correo ya está registrado: " + correo);
-                });
+        boolean existe = idExcluido == null ? usuarioRepository.existsByCorreoIgnoreCase(correoNormalizado)
+                : usuarioRepository.existsByCorreoIgnoreCaseAndIdUsuarioNot(correoNormalizado, idExcluido);
+        if (existe) throw new IllegalArgumentException("El correo ya está registrado: " + correo);
+
     }
 
     private void asignarRol(UsuarioSistema usuario, String codigoRol) {
@@ -177,22 +183,7 @@ public class UsuarioAdminService {
     }
 
     private long contarOtrosAdministradoresActivos(Long idExcluido) {
-        return usuarioRepository.findAll().stream()
-                .filter(u -> !u.getIdUsuario().equals(idExcluido))
-                .filter(u -> u.getEstadoUsuario() == EstadoUsuario.ACTIVO)
-                .filter(u -> ADMIN.equals(codigoRol(u.getIdUsuario())))
-                .count();
-    }
-
-    private String codigoRol(Long idUsuario) {
-        List<String> codigos = usuarioRolRepository.findByUsuario_IdUsuario(idUsuario).stream()
-                .map(UsuarioRol::getRol)
-                .filter(rol -> rol != null && rol.isEsActivo())
-                .map(Rol::getCodigoRol)
-                .toList();
-        if (codigos.contains(ADMIN)) return ADMIN;
-        if (codigos.contains("ANALISTA")) return "ANALISTA";
-        return "CLIENTE";
+        return usuarioRolRepository.contarOtrosAdministradoresActivos(idExcluido);
     }
 
     private UsuarioResumen toResumen(UsuarioSistema usuario) {
@@ -200,13 +191,17 @@ public class UsuarioAdminService {
                 .flatMap(clienteRepository::findById)
                 .map(Cliente::getCodigoCliente)
                 .orElse(null);
+        return toResumen(usuario, roles.codigo(usuario.getIdUsuario()), codigoCliente);
+    }
+
+    private UsuarioResumen toResumen(UsuarioSistema usuario, String rol, String codigoCliente) {
         return new UsuarioResumen(
                 usuario.getIdUsuario(),
                 usuario.getNombreUsuario(),
                 usuario.getNombres(),
                 usuario.getCorreo(),
                 usuario.getEstadoUsuario().name(),
-                codigoRol(usuario.getIdUsuario()),
+                rol,
                 codigoCliente,
                 usuario.getUltimoAcceso() != null ? usuario.getUltimoAcceso().toLocalDateTime() : null
         );

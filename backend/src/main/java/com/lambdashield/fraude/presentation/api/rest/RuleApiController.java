@@ -17,11 +17,21 @@ import java.util.List;
 public class RuleApiController {
 
     private final ReglaConsultaService reglaService;
+    private final com.lambdashield.fraude.application.service.EstadoReglaService estadoService;
+    public record EstadoRequest(@jakarta.validation.constraints.NotNull Boolean activa) {}
     private final ReglaResponseMapper mapper;
 
-    public RuleApiController(ReglaConsultaService reglaService, ReglaResponseMapper mapper) {
+    public RuleApiController(ReglaConsultaService reglaService, ReglaResponseMapper mapper, com.lambdashield.fraude.application.service.EstadoReglaService estadoService) {
+        this.estadoService = estadoService;
         this.reglaService = reglaService;
         this.mapper = mapper;
+    }
+
+    @PatchMapping("/{codigo}/estado")
+    public ResponseEntity<Void> cambiarEstado(@PathVariable String codigo,
+            @jakarta.validation.Valid @RequestBody EstadoRequest request) {
+        estadoService.establecer(codigo, request.activa());
+        return ResponseEntity.noContent().build();
     }
 
     /** Devuelve la lista de reglas activas almacenadas en la base de datos. */

@@ -2,27 +2,31 @@ package com.lambdashield.fraude.repository;
 
 import com.lambdashield.fraude.domain.entity.Transaccion;
 import com.lambdashield.fraude.domain.enums.NaturalezaTransaccion;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.math.BigDecimal;
-import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
-
 public interface TransaccionRepository extends JpaRepository<Transaccion, Long> {
-    Optional<Transaccion> findByCodigoTransaccion(UUID codigoTransaccion);
+    boolean existsByCodigoTransaccion(java.util.UUID codigoTransaccion);
     boolean existsByCuenta_Cliente_CodigoClienteAndDireccionIp(String codigoCliente, String direccionIp);
 
+    interface TotalNaturaleza {
+        NaturalezaTransaccion getNaturaleza();
+        BigDecimal getMonto();
+    }
+
     @Query("""
-            select t.tipoTransaccion.naturaleza, coalesce(sum(t.montoTransaccion), 0)
+            select t.tipoTransaccion.naturaleza as naturaleza, sum(t.montoTransaccion) as monto
             from Transaccion t
             where t.fechaHoraTransaccion >= :desde and t.fechaHoraTransaccion < :hasta
+              and t.estadoTransaccion = com.lambdashield.fraude.domain.enums.EstadoTransaccion.APROBADA
             group by t.tipoTransaccion.naturaleza
             """)
-    List<Object[]> sumarMontosPorNaturaleza(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta);
+    List<TotalNaturaleza> sumarMontosPorNaturaleza(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta);
 
     @Query("""
             select t from Transaccion t
@@ -30,18 +34,8 @@ public interface TransaccionRepository extends JpaRepository<Transaccion, Long> 
             join fetch c.cliente
             join fetch t.tipoTransaccion
             where t.fechaHoraTransaccion >= :desde and t.fechaHoraTransaccion < :hasta
-            order by t.fechaHoraTransaccion desc
+              and t.estadoTransaccion = com.lambdashield.fraude.domain.enums.EstadoTransaccion.APROBADA
+            order by t.fechaHoraTransaccion desc, t.idTransaccion desc
             """)
-    List<Transaccion> buscarDelPeriodo(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta);
-
-    List<Transaccion> findByFechaHoraTransaccionGreaterThanEqualAndFechaHoraTransaccionLessThanOrderByFechaHoraTransaccionDesc(
-            OffsetDateTime desde, OffsetDateTime hasta);
-
-    default BigDecimal sumarMonto(OffsetDateTime desde, OffsetDateTime hasta, NaturalezaTransaccion naturaleza) {
-        return sumarMontosPorNaturaleza(desde, hasta).stream()
-                .filter(fila -> fila[0] == naturaleza)
-                .map(fila -> (BigDecimal) fila[1])
-                .findFirst()
-                .orElse(BigDecimal.ZERO);
-    }
+    List<Transaccion> buscarDelPeriodo(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta, Pageable pageable);
 }

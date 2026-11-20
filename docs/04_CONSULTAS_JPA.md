@@ -1,85 +1,172 @@
-# Lambda Shield — Consultas personalizadas en JPA
+# 04 — Datos, consultas JPA y consistencia
 
-## 1. Cuándo se usa cada enfoque
+[Índice](README.md) · [Operación y migración](08_INSTALACION_OPERACION.md)
 
-| Enfoque | Cuándo usarlo | Ejemplos en el proyecto |
-| :--- | :--- | :--- |
-| Consultas derivadas por nombre de método | Búsquedas simples por uno o varios campos | `findByCodigoCliente`, `findByEsActivaTrueOrderByFechaEvaluacionDesc` |
-| `@Query` con JPQL | Agregaciones, `join fetch` y filtros opcionales | `sumarSaldoPorEstado`, `buscarDelPeriodo` |
-| Filtrado en memoria | Listas pequeñas y lógica compleja | `listarFiltrado` de reportes (por ahora) |
+## 1. Persistencia del proyecto
 
-## 2. Consultas personalizadas aplicadas
+El esquema de referencia es [BD-Desarrollo web.sql](../backend/src/main/resources/db/postgresql/BD-Desarrollo%20web.sql). El runtime usa PostgreSQL, valida el mapeo al arrancar y mantiene `open-in-view=false`. Las transacciones y consultas necesarias se coordinan en servicios.
 
-### 2.1 Suma de saldo por estado — `CuentaRepository`
+Existen 19 tablas y sus entidades, incluida `notificacion_usuario`. No todas tienen repositorio o caso de uso activo.
 
-```java
-@Query("select coalesce(sum(c.saldoDisponible), 0) from Cuenta c where c.estadoCuenta = :estado")
-BigDecimal sumarSaldoPorEstado(@Param("estado") EstadoCuenta estado);
+| Grupo | Tablas | Uso actual |
+| --- | --- | --- |
+| Identidad | `usuario_sistema`, `rol`, `usuario_rol` | Login, autorización y administración |
+| Cliente | `cliente`, `cuenta` | Titular, promedio, cuenta principal y saldo |
+| Contexto | `dispositivo`, `beneficiario` | Señales y referencias de operación |
+| Catálogos | `canal`, `tipo_transaccion`, `regla_fraude` | Canal, naturaleza y pesos de riesgo |
+| Operaciones | `transaccion`, `evaluacion_fraude`, `evaluacion_regla` | Persistencia y explicación del resultado |
+| Extensión del esquema | `caracteristica_transaccion`, `alerta_fraude`, `caso_fraude`, `historial_caso`, `auditoria` | Entidades conservadas; sin flujo completo de aplicación |
+
+## 2. Relaciones e identificadores
+
+```text
+Cliente → Cuenta → Transaccion → EvaluacionFraude → EvaluacionRegla → ReglaFraude
+Cliente → Dispositivo
+Cliente → Beneficiario
+Transaccion → TipoTransaccion / Canal / Dispositivo / Beneficiario
+UsuarioSistema → vínculo idCliente
+UsuarioSistema ↔ UsuarioRol ↔ Rol
 ```
 
-**Por qué:** el saldo total de las cuentas activas es un agregado; traer todas las cuentas a Java solo para sumarlas sería ineficiente. Se ejecuta en PostgreSQL y viaja un único número.
+- `UsuarioRol` tiene clave compuesta (`UsuarioRolId`).
+- `CaracteristicaTransaccion` comparte la clave de transacción mediante `@MapsId`; la migración elimina IDENTITY de esa clave compartida.
+- El UUID de `transaccion.codigo_transaccion` identifica la operación interna de transacción.
+- `EvaluacionResponse.id` es una etiqueta `TR-` derivada del ID de evaluación.
+- `idInterno` es el identificador que usan las rutas PATCH de evaluación.
 
-**Dónde se usa:** `DashboardResumenService.obtenerResumen` → saldo del dashboard.
+La cuenta principal es la primera por ID ascendente. No existe una preferencia de cuenta configurable por pantalla; si esa primera cuenta no está activa, el caso de uso de creación no selecciona automáticamente otra.
 
-### 2.2 Suma de montos por naturaleza — `TransaccionRepository`
+## 3. Estrategias de consulta
 
-```java
-@Query("""
-        select t.tipoTransaccion.naturaleza, coalesce(sum(t.montoTransaccion), 0)
-        from Transaccion t
-        where t.fechaHoraTransaccion >= :desde and t.fechaHoraTransaccion < :hasta
-        group by t.tipoTransaccion.naturaleza
-        """)
-List<Object[]> sumarMontosPorNaturaleza(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta);
-```
+| Estrategia | Aplicación |
+| --- | --- |
+| Métodos derivados | Buscar códigos, nombres, huellas y existencias |
+| JPQL con `@Query` | Agregados, conteos, carga relacionada y bloqueos |
+| `Specification` | Filtros opcionales de evaluaciones en BD |
+| `EntityGraph` | Cargar las relaciones usadas al construir resultados |
+| `Pageable` | Limitar movimientos recientes en BD |
+| Procesamiento en memoria | Agrupación diaria, resumen de un reporte ya filtrado y adaptación de modelos |
 
-**Por qué:** ingresos (crédito) y egresos (débito) se agregan en la base. El método `sumarMonto` (default en la interfaz) extrae el valor de la naturaleza pedida.
+El filtrado de reportes ya no se hace cargando todo el historial y descartándolo en Java. La validación de correo y el conteo de administradores tampoco requieren cargar todos los usuarios.
 
-**Dónde se usa:** `DashboardResumenService.obtenerResumen` → ingresos y egresos del periodo, y variaciones frente al periodo anterior.
+## 4. Historial y factores por lote
 
-### 2.3 Carga con join fetch — `TransaccionRepository.buscarDelPeriodo`
+`EvaluacionConsultaService` construye una `Specification<EvaluacionFraude>` con:
 
-```java
-@Query("""
-        select t from Transaccion t
-        join fetch t.cuenta c
-        join fetch c.cliente
-        join fetch t.tipoTransaccion
-        where t.fechaHoraTransaccion >= :desde and t.fechaHoraTransaccion < :hasta
-        order by t.fechaHoraTransaccion desc
-        """)
-List<Transaccion> buscarDelPeriodo(@Param("desde") OffsetDateTime desde, @Param("hasta") OffsetDateTime hasta);
-```
+- `esActiva` cuando se pide solo el historial activo.
+- Fecha de evaluación desde el inicio del día solicitado.
+- Fecha menor que el inicio del día siguiente a `hasta`.
+- Nivel convertido a `NivelRiesgo`.
+- Código de cliente mediante la relación transacción → cuenta → cliente.
 
-**Por qué:** la serie diaria y los movimientos recientes usan `t.getCuenta().getCliente().getCodigoCliente()` y `t.getTipoTransaccion().getNaturaleza()`. Sin `join fetch`, Hibernate lanzaba `LazyInitializationException` al renderizar la vista (open-in-view está desactivado). También evita N+1.
+Los resultados se ordenan por `fechaEvaluacion` y `idEvaluacion` descendentes.
 
-**Dónde se usa:** `DashboardMovimientosService.generarMovimientos` y `obtenerMovimientosRecientes`.
+La consulta usa un `EntityGraph` para transacción, cuenta, cliente, tipo y característica. Incluir la característica evita consultas adicionales por la relación uno a uno inversa, aunque normalmente no tenga datos.
 
-## 3. Consultas derivadas usadas
+Después se cargan todos los factores de las evaluaciones encontradas mediante `findByEvaluacion_IdEvaluacionInOrderByIdEvaluacionReglaAsc`, con su regla. Se agrupan por ID de evaluación y se construyen los resultados.
 
-| Método | Repositorio | Uso |
-| :--- | :--- | :--- |
-| `findByEsActivaTrueOrderByFechaEvaluacionDesc` | `EvaluacionFraudeRepository` | Historial y KPIs |
-| `findByEsActivaTrueAndTransaccion_Cuenta_Cliente_CodigoClienteOrderByFechaEvaluacionDesc` | `EvaluacionFraudeRepository` | Portal del cliente |
-| `countByEsActivaTrueAndTransaccion_Cuenta_Cliente_CodigoClienteAndFechaEvaluacionAfter` | `EvaluacionFraudeRepository` | Operaciones en la última hora (RF006) |
-| `findByIdEvaluacionAndEsActivaTrue` | `EvaluacionFraudeRepository` | Baja lógica |
-| `findByEvaluacion_IdEvaluacion` | `EvaluacionReglaRepository` | Desglose de reglas |
-| `findByCodigoCliente` | `ClienteRepository` | Búsqueda de cliente |
-| `findByNombreUsuario` | `UsuarioSistemaRepository` | Login |
-| `findFirstByCliente_IdClienteAndNombreBeneficiario` | `BeneficiarioRepository` | Derivar tipo de destinatario |
-| `findFirstByCliente_IdClienteOrderByIdCuentaAsc` | `CuentaRepository` | Cuenta principal del cliente |
+La prueba de regresión verifica **dos sentencias preparadas** para un historial no vacío en su fixture: una de evaluaciones/relaciones y una de factores/reglas. Un resultado vacío no requiere la segunda. Esto no significa que una petición HTTP completa ejecute solo dos SQL: la seguridad revalida también la identidad.
 
-## 4. Filtrado en memoria (a mejorar)
+El listado no está paginado; un rango amplio puede seguir devolver muchas filas y un conjunto grande de IDs para el lote.
 
-- `EvaluacionConsultaService.listarFiltrado`: carga todo el historial activo y filtra por fecha, nivel y cliente. Aceptable para el volumen actual; debería convertirse en una consulta con parámetros opcionales cuando crezca la tabla.
-- `UsuarioAdminService`: usa `findAll()` para unicidad de correo, listado y conteo de administradores. Debería usar `existsByCorreoIgnoreCase`, `countByRol` y `join fetch`.
+## 5. KPIs de evaluaciones
 
-## 5. Regla de oro aplicada
+`EvaluacionFraudeRepository.calcularMetricas()` obtiene en una consulta:
 
-Usar consulta personalizada cuando se cumpla alguna de estas condiciones:
+- Total activo.
+- Conteos por BAJO, MEDIO, ALTO y CRITICO mediante `case`.
+- Promedio del fraude score.
 
-1. La operación debe hacerse en la base (sumas, conteos, agrupaciones).
-2. Se leen relaciones en bucle (N+1 o `LazyInitializationException`).
-3. Se filtra por varios criterios opcionales sobre una tabla que crece.
+`EvaluacionMetricasService` adapta esa proyección a `KpisResultado` y utiliza promedio cero cuando no hay evaluaciones. No carga todas las entidades solo para contarlas.
 
-En el resto de los casos, las consultas derivadas por nombre de método son suficientes y más legibles.
+## 6. Agregaciones financieras
+
+### Saldo
+
+`CuentaRepository.sumarSaldoPorEstado` suma `saldoDisponible` con `coalesce` para un estado de cuenta. El dashboard solicita ACTIVA.
+
+### Montos por naturaleza
+
+`TransaccionRepository.sumarMontosPorNaturaleza` devuelve una proyección tipada `TotalNaturaleza`, con naturaleza y monto decimal. La consulta filtra fecha y estado APROBADA, y agrupa por crédito/débito.
+
+`DashboardResumenService` ejecuta dos agregaciones: periodo actual y anterior. Cada una ya incluye ambas naturalezas; no se repite una consulta idéntica para extraer ingresos y egresos por separado. Se suma además el saldo de cuentas activas.
+
+### Serie diaria y movimientos recientes
+
+`buscarDelPeriodo` utiliza `join fetch` sobre cuenta, cliente y tipo. Filtra APROBADA y ordena por fecha e ID de transacción descendentes.
+
+- Serie: usa `Pageable.unpaged()`, carga operaciones del periodo y las agrupa por día en Java con `BigDecimal`.
+- Recientes: usa `PageRequest.of(0, cantidad)`; el endpoint solicita ocho filas. El límite se aplica en BD y no después de cargar el periodo entero.
+
+No se debe afirmar que todos los recorridos del dashboard tienen un número constante mínimo de SQL: las relaciones y el tamaño de la serie siguen requiriendo seguimiento de rendimiento.
+
+## 7. Usuarios, roles y validación
+
+`UsuarioAdminService.listar` ordena usuarios por ID descendente, obtiene sus roles en un lote y resuelve clientes con `findAllById`.
+
+En el fixture de consistencia se verifican **tres sentencias** para ese listado no vacío: usuarios, asignaciones/roles y clientes. Si no hay clientes vinculados o usuarios, el comportamiento puede usar menos consultas.
+
+Las búsquedas de correo usan `existsByCorreoIgnoreCase` y su variante que excluye un ID. El conteo de otros administradores activos se calcula con un JPQL `count(distinct ...)` sobre usuarios y roles activos.
+
+`RolUsuarioService` concentra la jerarquía de privilegios para login, revalidación y administración. La validación de unicidad previa mejora el mensaje al usuario; las restricciones de BD siguen siendo necesarias ante concurrencia.
+
+## 8. Bloqueos de escritura
+
+### Crear
+
+`CuentaRepository.findFirstByCliente_IdClienteOrderByIdCuentaAsc` tiene `PESSIMISTIC_WRITE`. La transacción del caso de uso mantiene el bloqueo mientras decide y aplica el movimiento, y persiste el resultado.
+
+### Desactivar o reactivar
+
+1. `EvaluacionFraudeRepository.bloquearPorId` bloquea la evaluación.
+2. Se comprueba su estado activo.
+3. `CuentaRepository.bloquearPorId` bloquea la cuenta relacionada.
+4. Se aplica el movimiento o reverso y se actualizan estados.
+
+Bloquear la evaluación evita que dos acciones sobre la misma evaluación ejecuten dos reversos. Bloquear la cuenta evita sobrescribir saldos entre distintas operaciones. Las lecturas ordinarias usan `findTopByCliente_IdClienteOrderByIdCuentaAsc`, sin ese bloqueo de escritura.
+
+`MovimientoSaldoService` opera sobre la entidad bloqueada dentro de la transacción existente; no abre una transacción financiera separada. Hibernate persiste el saldo modificado mediante seguimiento de cambios.
+
+Las pruebas concurrentes usan transacciones independientes. No demuestran idempotencia de POST ni eliminan todos los posibles bloqueos/esperas de PostgreSQL bajo carga.
+
+## 9. Precisión, fechas e historial
+
+Los campos monetarios principales usan escala 2. El DTO exige hasta 16 enteros y 2 decimales; no se convierte primero el importe a `double` para descontarlo. Las respuestas monetarias son números JSON exactos generados desde `BigDecimal`; un consumidor debe elegir un parser decimal si necesita conservar importes muy grandes sin la limitación de números JavaScript.
+
+Las fechas persistidas principales usan `OffsetDateTime` y columnas de tiempo con zona. Los filtros diarios usan la zona por defecto del servidor. El DTO de evaluación convierte su fecha a `LocalDateTime`, de modo que `fechaHora` no incluye offset; `fecha` es una representación para mostrar.
+
+Los máximos, etiquetas y versiones de factores se copian al evaluar. La versión de modelo y duración tienen actualmente valores fijos. No se guarda un evento de auditoría separado por cada acción administrativa ni un asiento financiero separado por reverso.
+
+## 10. Scripts y migración
+
+El esquema canónico contiene creación de tablas y está destinado a una base nueva. No se debe asumir idempotente ni ejecutarlo sobre una base en uso como sustituto de una migración.
+
+La [migración existente](../backend/src/main/resources/db/postgresql/migracion_soft_delete_postgresql.sql) es transaccional e idempotente para los cambios que incluye:
+
+- Código, promedio y estado activo de cliente.
+- Dirección IP de dispositivo y normalización de tipos IP/JSON.
+- Estado activo y fecha de desactivación de evaluación.
+- Vínculo usuario → cliente.
+- Corrección de la clave compartida de características.
+- Copias históricas de máximo, etiqueta y versión de factores, con backfill desde el catálogo.
+
+El runtime no aplica estos scripts automáticamente. Las instrucciones de copia de seguridad, ejecución y comprobación están en [operación](08_INSTALACION_OPERACION.md).
+
+## 11. Límites pendientes
+
+- Listados y exportaciones generales sin paginación/streaming; la bandeja de notificaciones sí está paginada.
+- Agrupación diaria en memoria sobre las transacciones del periodo.
+- Consulta de cuenta por cliente en algunos recorridos del selector.
+- No hay migraciones versionadas mediante Flyway/Liquibase.
+- Las pruebas H2 no sustituyen la comprobación del SQL y los bloqueos sobre PostgreSQL real.
+- La regla del último administrador tiene validación de negocio; no existe en este cambio una prueba de su serialización entre modificaciones administrativas simultáneas.
+
+Estos puntos describen el estado real y no deben presentarse como problemas ya resueltos ni como garantías de escalabilidad.
+
+## Persistencia de contactos y notificaciones
+
+Después de la migración general se aplica [contactos y notificaciones](../backend/src/main/resources/db/postgresql/migracion_contactos_notificaciones.sql). Crea `notificacion_usuario` con unicidad por usuario, evaluación y tipo, e índices de bandeja y pendientes. Añade unicidad de beneficiario por cliente y número; los contactos antiguos sin número pueden coexistir. Los duplicados previos con número deben corregirse antes de crear el índice.
+
+El script precarga contactos entre clientes activos con cuenta activa y reconstruye avisos históricos de evaluaciones activas bloqueadas/retenidas para usuarios con rol CLIENTE. Repetirlo no duplica registros ni reinicia lecturas. No se ejecuta automáticamente al arrancar.
+
+La consulta paginada usa `EntityGraph` para evaluación, transacción y características. Las actualizaciones de lectura incluyen siempre al usuario en el filtro. La creación del aviso participa en la misma transacción que la evaluación; un rollback revierte ambas.
