@@ -71,7 +71,10 @@ Los servicios usan Spring Data directamente. No hay una capa adicional de puerto
 | --- | --- |
 | `EvaluacionTransaccionService` | Crear/evaluar, persistir y cambiar el estado activo de operaciones |
 | `DeteccionFraudeService` | Ejecutar implementaciones de reglas, sumar y clasificar |
-| `CatalogoReglasService` | Aplicar activación/pesos de BD y asociar reglas a factores |
+| `CatalogoReglasService` | Ejecutar reglas RF y RC participantes y repartir el 100 % del puntaje según sus pesos |
+| `ReglaDefinidaEvaluador` | Ejecutar, serializar y describir las definiciones tipadas de reglas RC |
+| `ReglaPersonalizadaService` / `EstadoReglaService` | Crear reglas RC inactivas y activarlas/desactivarlas con auditoría |
+| `SimulacionReglasService` | Probar escenarios sin persistir, comparando catálogo vigente y candidatas |
 | `MovimientoSaldoService` | Aplicar débito/crédito y su reverso sobre una cuenta bloqueada |
 | `TransaccionReferenciasResolver` | Resolver tipo, canal, dispositivo y beneficiario |
 | `BeneficiarioConsultaService` | Agenda numerada del cliente autenticado |
@@ -99,7 +102,7 @@ Se mantiene esta combinación; no hay una migración a HTML estático en curso.
 | Dashboard | Resumen financiero y movimientos | Gráfico, cambio de periodo y actualización de cifras |
 | Transacciones | Rol, navegación y estructura | Lista, KPIs, filtros locales, detalle y acciones |
 | Usuarios | Usuario actual, rol y estructura | CRUD completo por API |
-| Reglas | Catálogo activo | Utilidades de sesión compartidas |
+| Reglas | Catálogo completo (activas e inactivas) | Búsqueda, paginación, activación/desactivación y asistente IA (ADMIN) |
 | Simulador | Clientes y promedios del selector | Envío, radar de factores y tráfico automático |
 | Reportes | Resultado filtrado y resumen | Construcción de enlaces de exportación |
 | Operación | Cliente, cuenta, saldo, historial y avisos propios | Envío y actualización del recibo, saldo e historial |

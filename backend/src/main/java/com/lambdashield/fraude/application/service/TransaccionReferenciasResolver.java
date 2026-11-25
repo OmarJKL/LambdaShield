@@ -1,6 +1,7 @@
 package com.lambdashield.fraude.application.service;
 
 import com.lambdashield.fraude.application.command.EvaluarTransaccionCommand;
+import com.lambdashield.fraude.domain.account.NumeroCuenta;
 import com.lambdashield.fraude.domain.entity.Beneficiario;
 import com.lambdashield.fraude.domain.entity.Canal;
 import com.lambdashield.fraude.domain.entity.Cliente;
@@ -35,9 +36,13 @@ public class TransaccionReferenciasResolver {
         this.cuentas = cuentas;
     }
 
-    public Referencias resolver(Cliente cliente, EvaluarTransaccionCommand request, String userAgent) {
+    /**
+     * @param catalogoAbierto true solo para las operaciones administrativas (simulador y carga demo),
+     *                        que pueden registrar una categoría nueva. El portal del cliente usa el catálogo existente.
+     */
+    public Referencias resolver(Cliente cliente, EvaluarTransaccionCommand request, String userAgent, boolean catalogoAbierto) {
         return new Referencias(
-                tipoTransaccion(request.categoria()),
+                tipoTransaccion(request.categoria(), catalogoAbierto),
                 canalWeb(),
                 dispositivos.resolver(cliente, request.dispositivo(), userAgent),
                 request.numeroCuentaDestino() != null && !request.numeroCuentaDestino().isBlank()
@@ -46,10 +51,14 @@ public class TransaccionReferenciasResolver {
         );
     }
 
-    private TipoTransaccion tipoTransaccion(String categoria) {
+    private TipoTransaccion tipoTransaccion(String categoria, boolean catalogoAbierto) {
         String codigo = categoria == null || categoria.isBlank()
                 ? "otros"
                 : categoria.trim().toLowerCase(Locale.ROOT);
+        if (!catalogoAbierto) {
+            return tipoTransaccionRepository.findByCodigoTipo(codigo).filter(TipoTransaccion::isEsActivo)
+                    .orElseThrow(() -> new IllegalArgumentException("La categoría seleccionada no está disponible"));
+        }
         return tipoTransaccionRepository.findByCodigoTipo(codigo)
                 .orElseGet(() -> tipoTransaccionRepository.save(TipoTransaccion.builder()
                         .codigoTipo(codigo)
@@ -110,7 +119,8 @@ public class TransaccionReferenciasResolver {
 
     private Beneficiario beneficiarioPorCuenta(Cliente cliente, EvaluarTransaccionCommand request) {
         String numero = request.numeroCuentaDestino().replace(" ", "").trim();
-        var destino = cuentas.findByNumeroCuenta(numero);
+        String digitos = NumeroCuenta.normalizar(numero);
+        var destino = cuentas.buscarPorNumeroNormalizado(digitos);
         if (destino.isEmpty() && "lambda".equals(request.bancoDestino())) {
             throw new IllegalArgumentException("No existe una cuenta Lambda Shield con ese número");
         }
@@ -121,7 +131,7 @@ public class TransaccionReferenciasResolver {
         if (destino.isPresent() && destino.get().getCliente().getIdCliente().equals(cliente.getIdCliente())) {
             throw new IllegalArgumentException("Selecciona una cuenta de otro destinatario");
         }
-        var existente = beneficiarioRepository.findFirstByCliente_IdClienteAndNumeroCuentaDestino(cliente.getIdCliente(), numero);
+        var existente = beneficiarioRepository.buscarPorCuentaNormalizada(cliente.getIdCliente(), digitos).stream().findFirst();
         if (existente.isPresent()) {
             Beneficiario beneficiario = existente.get();
             comprobarActivo(beneficiario);
@@ -144,7 +154,8 @@ public class TransaccionReferenciasResolver {
             default -> "Lambda Shield";
         };
         return beneficiarioRepository.save(Beneficiario.builder().cliente(cliente).nombreBeneficiario(nombre.trim())
-                .numeroCuentaDestino(numero).entidadFinanciera(banco).codigoPais("PE").esConocido(false).esActivo(true)
+                .numeroCuentaDestino(destino.map(com.lambdashield.fraude.domain.entity.Cuenta::getNumeroCuenta).orElse(numero))
+                .entidadFinanciera(banco).codigoPais("PE").esConocido(false).esActivo(true)
                 .fechaPrimerUso(OffsetDateTime.now()).fechaUltimoUso(OffsetDateTime.now()).build());
     }
 

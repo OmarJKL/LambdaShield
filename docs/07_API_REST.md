@@ -45,7 +45,9 @@ Además de los errores específicos, todos los endpoints protegidos pueden ser r
 | GET | `/api/v1/metric/summary` | ADMIN, ANALISTA | 200 con resumen |
 | GET | `/api/v1/metric/movement` | ADMIN, ANALISTA | 200 con serie |
 | GET | `/api/v1/metric/recent` | ADMIN, ANALISTA | 200 con hasta ocho movimientos |
-| GET | `/api/v1/rule` | ADMIN, ANALISTA | 200 con catálogo activo |
+| GET | `/api/v1/rule` | ADMIN, ANALISTA | 200 con las reglas activas |
+| POST | `/api/v1/rule` | ADMIN + CSRF | 201 con la regla RC creada inactiva |
+| POST | `/api/v1/rule/simulation` | ADMIN + CSRF | 200 con resultados sin persistir |
 | PATCH | `/api/v1/rule/{codigo}/estado` | ADMIN + CSRF | 204; cuerpo `{"activa":true}` o `{"activa":false}` |
 | GET | `/api/v1/report/export` | ADMIN, ANALISTA | 200 con archivo |
 | GET | `/api/v1/user` | ADMIN | 200 con lista |
@@ -57,6 +59,9 @@ Además de los errores específicos, todos los endpoints protegidos pueden ser r
 | GET | `/api/v1/notification?pagina=0` | CLIENTE | 200 con bandeja propia |
 | PATCH | `/api/v1/notification/{id}/leer` | CLIENTE | 204 |
 | PATCH | `/api/v1/notification/leer-todas` | CLIENTE | 204 |
+| GET | `/api/v1/account/destination?numero=…` | CLIENTE | 200 con titular interno |
+| GET | `/api/v1/rule/assistant/status` | ADMIN | 200 con disponibilidad |
+| POST | `/api/v1/rule/assistant/review` | ADMIN + CSRF | 200 con definición y revisión |
 
 No existen GET de evaluación por ID, GET REST del historial del cliente, edición REST de condiciones o pesos de reglas, creación REST de clientes ni transferencia a una cuenta externa.
 
@@ -92,7 +97,7 @@ El encabezado mostrado es el predeterminado; un cliente debe preferir el nombre 
 | --- | --- | --- |
 | `cliente` | string | No vacío; 1–20 caracteres `[A-Za-z0-9-]`; CLIENTE no elige con él el titular efectivo |
 | `monto` | decimal | Obligatorio, > 0, hasta 16 enteros y 2 decimales |
-| `categoria` | string/null | Opcional; hasta 40 letras o `_`; vacío/nulo se resuelve como `otros` |
+| `categoria` | string/null | Opcional; hasta 40 letras o `_`; vacío/nulo se resuelve como `otros`. Para CLIENTE debe existir y estar activa (400 si no); ADMIN puede registrar una nueva |
 | `hora` | entero | 0–23; CLIENTE usa la del servidor |
 | `pais` | string | Obligatorio: `local`, `regional`, `alto_riesgo` |
 | `dispositivo` | string | Obligatorio: `reconocido`, `nuevo`; CLIENTE lo deriva |
@@ -100,12 +105,12 @@ El encabezado mostrado es el predeterminado; un cliente debe preferir el nombre 
 | `beneficiario` | string/null | Opcional: vacío, `recurrente`, `nuevo`; con nombre prevalece la resolución por historial |
 | `ip` | string | Obligatorio: `conocida`, `nueva`; CLIENTE usa la conexión real |
 | `beneficiarioNombre` | string/null | Opcional; hasta 150 caracteres |
-| `numeroCuentaDestino` | string/null | Opcional; vacío o 6–50 dígitos, espacios o guiones |
+| `numeroCuentaDestino` | string/null | Opcional; vacío o 6–50 dígitos, espacios o guiones; se compara sin espacios ni guiones |
 | `bancoDestino` | string/null | Opcional; vacío, `lambda`, `bcp`, `bbva`, `interbank`, `scotiabank` |
 
 `hora` y `operacionesUltimaHora` son primitivas Java y, si se omiten, pueden tomar 0 durante la deserialización. No debe interpretarse que todos los campos del ejemplo tienen una restricción `NotNull`.
 
-Para CLIENTE deben enviarse valores formalmente válidos también en campos derivados: Bean Validation se ejecuta antes de reemplazarlos. Si el usuario no tiene código de cliente activo asociado, se devuelve 403. ADMIN utiliza señales manuales y puede indicar otro cliente existente.
+Para CLIENTE deben enviarse valores formalmente válidos también en campos derivados: Bean Validation se ejecuta antes de reemplazarlos. Si el usuario no tiene código de cliente activo asociado, se cierra la sesión y se redirige al login. ADMIN utiliza señales manuales y puede indicar otro cliente existente.
 
 ### Respuesta
 
@@ -150,7 +155,7 @@ En una configuración con reglas activas, `factores` contiene elementos como:
 
 `estado` es una etiqueta visual según riesgo. Para mostrar una evaluación desactivada se debe considerar `activa`; no se debe deducir el estado interno de la transacción solo de esa etiqueta.
 
-Una operación retenida o bloqueada también responde 200 porque la evaluación se completó correctamente. Un débito aprobado sin fondos responde 400 y no completa una evaluación persistida. Una referencia de cliente inexistente responde 404; un catálogo inconsistente produce error interno genérico y rollback.
+Una operación retenida o bloqueada también responde 200 porque la evaluación se completó correctamente. Un débito aprobado sin fondos responde 400 y no completa una evaluación persistida. Un cliente sin cuenta ACTIVA también responde 400. Para ADMIN, una `hora` posterior a la actual se registra en el día anterior. Una referencia de cliente inexistente responde 404; un catálogo inconsistente produce error interno genérico y rollback.
 
 ## 5. Listado y cambios de estado
 
@@ -227,7 +232,9 @@ Hasta ocho elementos ordenados por fecha e ID descendentes:
 
 ### GET `/api/v1/rule`
 
-Lista de reglas activas ordenada por código, con `codigo`, `nombre`, `descripcion`, `pesoMaximo` y `activa`. El cambio de estado usa `PATCH /api/v1/rule/{codigo}/estado` con un booleano `activa` obligatorio; devuelve 404 si la regla no existe y 400 si falta el estado. Solo ADMIN con CSRF puede cambiarlo. Los pesos activos deben ser enteros 0–100.
+Lista solo las reglas activas, ordenadas por código, con `codigo`, `nombre`, `descripcion`, `pesoMaximo` (peso relativo), `activa` (siempre `true` aquí), `participacion` (porcentaje del puntaje que aporta, un decimal) y `personalizada` (`true` para RC). El catálogo completo, con inactivas, se consulta en la página `/reglas`. `pesoMaximo` es `null` si el peso guardado no es un entero 0–100.
+
+El cambio de estado usa `PATCH /api/v1/rule/{codigo}/estado` con un booleano `activa` obligatorio. Solo ADMIN con CSRF puede cambiarlo. Respuestas: 204 (también si ya tenía ese estado); 404 si la regla no existe; 400 si falta el estado, si se intenta desactivar la última regla activa o si se activa una regla sin implementación o con peso inválido. Cada cambio efectivo queda registrado en `auditoria`.
 
 ### GET `/api/v1/report/export`
 
@@ -273,7 +280,7 @@ La clave es un ejemplo ficticio para una base de desarrollo; no se recomienda us
 | `usuario` | 3–20 minúsculas, números, `.`, `_`, `-`; único |
 | `nombres` | Obligatorio, hasta 120 |
 | `correo` | Obligatorio, formato correo, hasta 150 y único |
-| `clave` | Obligatoria, 8–72 caracteres en el DTO; BCrypt impone además sus límites de representación |
+| `clave` | Obligatoria, al menos 8 caracteres y como máximo 72 bytes UTF-8 (límite de BCrypt); tildes y emojis ocupan más de un byte |
 | `rol` | ADMIN, ANALISTA o CLIENTE |
 | `codigoCliente` | CLIENTE requiere código existente; los demás pueden no tener vínculo |
 
@@ -289,21 +296,21 @@ Body `{"clave":"OtraClaveDeEjemplo123"}`; éxito 204. Las sesiones con el hash a
 
 ### GET y DELETE
 
-GET de colección o por ID devuelve `id`, `usuario`, `nombres`, `correo`, `estado`, `rol`, `codigoCliente` y `ultimoAcceso`. No devuelve hash ni contraseña. DELETE elimina el usuario y sus roles, con protección de cuenta propia y último administrador. Las restricciones referenciales de otros datos pueden impedir una baja.
+GET de colección o por ID devuelve `id`, `usuario`, `nombres`, `correo`, `estado`, `rol`, `codigoCliente` y `ultimoAcceso`. No devuelve hash ni contraseña. DELETE elimina el usuario y sus roles, con protección de cuenta propia y último administrador. Si el usuario tiene registros relacionados (auditoría, alertas, casos), responde 409 y no elimina nada.
 
 ## 9. Errores y precedencia
 
 | Estado | Causas habituales | Forma habitual |
 | --- | --- | --- |
 | 400 | DTO/parámetro inválido, body ilegible, saldo insuficiente, regla administrativa; también firewall | Aplicación: `errores`; firewall: no asumir ese mismo body |
-| 401 | Identidad ausente, expirada o revocada | `{"error":"No autenticado"}` |
-| 403 | Rol, ruta/método no declarado o CSRF inválido | `{"error":"..."}`; algunos rechazos del controlador pueden no tener body |
+| 302 → `/login` | Identidad ausente, expirada o revocada; rol, ruta o método no autorizado; CSRF inválido. Si había sesión, se invalida | Sin cuerpo |
 | 404 | Cliente, usuario o evaluación no encontrados en ruta autorizada | `{"errores":["..."]}` |
+| 409 | Una restricción de integridad impide el cambio (p. ej. eliminar un usuario con auditoría) | `{"errores":["..."]}` |
 | 415 | Tipo de contenido no admitido en escritura JSON | `{"errores":["..."]}` |
 | 429 | Ventana de solicitudes agotada | `error` y `Retry-After: 60` |
 | 500 | Error no traducido, catálogo inconsistente u otro fallo interno | `{"errores":["Error interno del servidor"]}` |
 
-Los controles anteriores al controlador pueden ganar precedencia: una escritura sin CSRF responde 403 aunque su body sea inválido; un límite agotado puede responder 429 antes de revalidar sesión. Una ruta no autorizada no garantiza un 404 de entidad o un 405 de método.
+Los controles anteriores al controlador pueden ganar precedencia: una escritura sin CSRF se redirige al login aunque su body sea inválido; un límite agotado puede responder 429 antes de revalidar sesión. Una ruta no autorizada no garantiza un 404 de entidad o un 405 de método. Un cliente HTTP que no sea el navegador debe tratar la redirección a `/login` como «sin acceso».
 
 Ejemplos:
 
@@ -378,11 +385,11 @@ Para una escritura JSON, usar la misma cookie y token renovado, `Content-Type: a
 
 Cada elemento contiene `id`, `tipo` (`BLOQUEADA` o `RETENIDA`), `titulo`, `mensaje`, `operacion` (etiqueta TR), `monto`, `puntaje`, `fecha` (ISO con zona) y `leida`. El mensaje incluye los factores activados. No hay avisos para operaciones aprobadas.
 
-`PATCH /api/v1/notification/{id}/leer` y `PATCH /api/v1/notification/leer-todas` no requieren cuerpo y sí exigen CSRF; devuelven 204. Leer un aviso ya leído es idempotente. Un ID inexistente o de otro usuario devuelve 404. La identidad se obtiene de la sesión y ADMIN/ANALISTA reciben 403. Desactivar una evaluación no borra el aviso del evento original.
+`PATCH /api/v1/notification/{id}/leer` y `PATCH /api/v1/notification/leer-todas` no requieren cuerpo y sí exigen CSRF; devuelven 204. Leer un aviso ya leído es idempotente. Un ID inexistente o de otro usuario devuelve 404. La identidad se obtiene de la sesión y ADMIN/ANALISTA son redirigidos al login. Desactivar una evaluación no borra el aviso del evento original.
 
 ## Consultar titular de cuenta interna
 
-`GET /api/v1/account/destination?numero=0011-2026-0000000102` requiere sesión CLIENTE. Devuelve 200 con `nombre`, `numeroCuenta` y `banco` (`lambda`). No expone saldo, documento, correo ni identificadores internos. Solo busca el número completo, sin búsquedas parciales ni listados. El parámetro admite 6–34 caracteres numéricos, espacios y guiones; un formato inválido devuelve 400. Cuenta inexistente, inactiva, cliente desactivado o cuenta propia devuelve 404; otros roles reciben 403 y sin sesión 401. Se aplica el límite general de peticiones autenticadas.
+`GET /api/v1/account/destination?numero=0011-2026-0000000102` requiere sesión CLIENTE. Devuelve 200 con `nombre`, `numeroCuenta` y `banco` (`lambda`). No expone saldo, documento, correo ni identificadores internos. Solo busca el número completo, sin búsquedas parciales ni listados. El parámetro admite 6–34 caracteres numéricos, espacios y guiones; un formato inválido devuelve 400. Cuenta inexistente, inactiva, cliente desactivado o cuenta propia devuelve 404; otros roles o sin sesión, redirección al login. Se aplica el límite general de peticiones autenticadas.
 
 La creación de una operación vuelve a comprobar el destino en el servidor; el autocompletado no sustituye esa validación. Un número inexistente con banco `lambda` se rechaza y los datos de contactos internos se actualizan con el titular real al usarlos.
 
@@ -393,3 +400,32 @@ La creación de una operación vuelve a comprobar el destino en el servidor; el 
 ## Restricción de naturaleza para CLIENTE
 
 En POST `/api/v1/evaluation`, seleccionar una categoría cuyo tipo sea CREDITO devuelve 400 para CLIENTE y no modifica saldo. ADMIN conserva el recorrido de pruebas separado. La activación del destinatario se verifica tanto por número como por nombre.
+
+### Presentación de las exportaciones
+
+PDF y Excel incluyen identidad de Lambda Shield, fechas de los registros exportados, emisión en hora de Lima, cantidad, monto evaluado en PEN, puntaje promedio y número de evaluaciones de riesgo alto o crítico. El monto evaluado suma los importes de las evaluaciones incluidas; no representa egresos aprobados ni pérdidas por fraude.
+
+El Excel conserva una hoja con datos numéricos y fechas tipadas, indicadores calculados, filtros, paneles inmovilizados y preparación de impresión horizontal. Los textos se almacenan como texto, incluso si comienzan con `=`. El PDF repite el encabezado del detalle y numera las páginas. Ambos muestran un mensaje legible al no haber registros. El CSV conserva el contrato de datos existente.
+
+## Reglas definidas y pruebas sin guardar
+
+### POST `/api/v1/rule`
+
+Body: la misma definición que acepta el asistente (`nombre`, `objetivo`, `combinacion`, `puntos` como peso relativo 1–100 y de 1 a 8 `condiciones`). Responde 201 con la regla (`codigo` RC001, RC002…, `activa: false`, `personalizada: true`). Definición inválida: 400. Para que participe en el motor hay que activarla con `PATCH /api/v1/rule/{codigo}/estado`.
+
+### POST `/api/v1/rule/simulation`
+
+```json
+{
+  "escenarios": [{"cliente":"C-001","monto":900,"categoria":"servicios","hora":2,"pais":"regional",
+                  "dispositivo":"nuevo","operacionesUltimaHora":3,"beneficiario":"nuevo","ip":"nueva"}],
+  "candidatas": ["RC001"],
+  "borrador": null
+}
+```
+
+- `escenarios`: de 1 a 100, con las validaciones de una evaluación. La categoría no influye y no se crea.
+- `candidatas`: hasta 20 códigos del catálogo que se evalúan como si estuvieran activos; un código inexistente, sin implementación o con peso inválido devuelve 400.
+- `borrador`: definición opcional sin guardar, con el mismo contrato de `POST /api/v1/rule`; su factor aparece con id `borrador`.
+
+Respuesta: `{"resultados":[{"cliente","vigente","conCandidatas","saldoDisponible","fondosSuficientes"}]}`. `vigente` y `conCandidatas` contienen `puntaje`, `nivel`, `estado` (APROBADA, RETENIDA o BLOQUEADA) y `factores`. `conCandidatas` es `null` sin candidatas ni borrador. No se persiste nada ni se mueve saldo.

@@ -17,7 +17,7 @@ class OpenRouterAsistenteReglasTest {
         "sugerencias":[],"pruebas":["Monto superior: dispara.","Monto igual al límite: no dispara."]}
         """;
     private final HttpClient http = mock(HttpClient.class);
-    private OpenRouterAsistenteReglas adaptador(String url) { return new OpenRouterAsistenteReglas(true, "clave-ficticia", url, "qwen/qwen-plus", 1, http); }
+    private OpenRouterAsistenteReglas adaptador(String url) { return new OpenRouterAsistenteReglas(true, "clave-ficticia", url, "nvidia/nemotron-3.5-super-vl:free", 1, http); }
     private DefinicionRegla definicion() {
         return new DefinicionRegla("Regla", "Revisar", DefinicionRegla.Combinacion.TODAS, 25,
                 List.of(new DefinicionRegla.Condicion(DefinicionRegla.Campo.MONTO, DefinicionRegla.Operador.MAYOR, "1000")));
@@ -81,10 +81,15 @@ class OpenRouterAsistenteReglasTest {
         });
         received.get(1, java.util.concurrent.TimeUnit.SECONDS);
         var payload = tools.jackson.databind.json.JsonMapper.builder().build().readTree(bytes.toByteArray());
-        assertThat(payload.path("model").asText()).isEqualTo("qwen/qwen-plus");
+        assertThat(payload.path("model").asText()).isEqualTo("nvidia/nemotron-3.5-super-vl:free");
         assertThat(payload.path("reasoning").path("enabled").asBoolean()).isFalse();
         assertThat(payload.has("enable_thinking")).isFalse();
-        assertThat(payload.path("response_format").path("type").asText()).isEqualTo("json_object");
+        assertThat(payload.path("response_format").path("type").asText()).isEqualTo("json_schema");
+        var esquema = payload.path("response_format").path("json_schema");
+        assertThat(esquema.path("strict").asBoolean()).isTrue();
+        assertThat(esquema.path("schema").path("additionalProperties").asBoolean()).isFalse();
+        assertThat(esquema.path("schema").path("required")).hasSize(4);
+        assertThat(esquema.path("schema").path("properties").path("pruebas").path("minItems").asInt()).isEqualTo(2);
         assertThat(payload.path("max_tokens").asInt()).isEqualTo(1600);
     }
     @Test void salidaTruncadaNoSeUsaComoRevision() {

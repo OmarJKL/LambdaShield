@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import com.lambdashield.fraude.presentation.validation.ClaveValida;
 
 public record UsuarioCrearRequest(
     @NotBlank(message = "El nombre de usuario es obligatorio")
@@ -20,8 +21,7 @@ public record UsuarioCrearRequest(
     @Size(max = 150, message = "El correo admite hasta 150 caracteres")
     String correo,
 
-    @NotBlank(message = "La clave es obligatoria")
-    @Size(min = 8, max = 72, message = "La clave debe tener entre 8 y 72 caracteres")
+    @ClaveValida
     String clave,
 
     @NotBlank(message = "El rol es obligatorio")

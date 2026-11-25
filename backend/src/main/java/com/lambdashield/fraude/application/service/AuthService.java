@@ -1,6 +1,7 @@
 package com.lambdashield.fraude.application.service;
 
 import com.lambdashield.fraude.domain.entity.UsuarioSistema;
+import com.lambdashield.fraude.application.validation.PoliticaClave;
 import com.lambdashield.fraude.domain.enums.EstadoUsuario;
 import com.lambdashield.fraude.repository.ClienteRepository;
 import com.lambdashield.fraude.repository.UsuarioSistemaRepository;
@@ -50,7 +51,8 @@ public class AuthService {
 
     @Transactional
     public Optional<UsuarioSesion> autenticar(String usuario, String clave) {
-        if (usuario == null || usuario.isBlank() || usuario.length() > 80 || clave == null || clave.isBlank() || clave.length() > 128) {
+        if (usuario == null || usuario.isBlank() || usuario.length() > 80
+                || !PoliticaClave.longitudAdmitida(clave) || clave.isBlank()) {
             return Optional.empty();
         }
 

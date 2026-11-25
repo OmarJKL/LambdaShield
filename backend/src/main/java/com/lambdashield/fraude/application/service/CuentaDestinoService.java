@@ -1,5 +1,6 @@
 package com.lambdashield.fraude.application.service;
 
+import com.lambdashield.fraude.domain.account.NumeroCuenta;
 import com.lambdashield.fraude.domain.customer.NombreClienteFormatter;
 import com.lambdashield.fraude.domain.enums.EstadoCuenta;
 import com.lambdashield.fraude.repository.CuentaRepository;
@@ -15,7 +16,7 @@ public class CuentaDestinoService {
     @Transactional(readOnly = true)
     public Optional<Destino> buscar(String numero, String clienteOrigen) {
         if (clienteOrigen == null) return Optional.empty();
-        return cuentas.findByNumeroCuenta(numero.replace(" ", ""))
+        return cuentas.buscarPorNumeroNormalizado(NumeroCuenta.normalizar(numero))
                 .filter(c -> c.getEstadoCuenta() == EstadoCuenta.ACTIVA && c.getCliente().isEsActivo()
                         && !c.getCliente().getCodigoCliente().equals(clienteOrigen))
                 .map(c -> new Destino(NombreClienteFormatter.nombreCompleto(c.getCliente()), c.getNumeroCuenta(), "lambda"));

@@ -4,11 +4,13 @@
 
 ## Carga inicial y ampliación
 
+**Tamaño actual del conjunto:** una carga completa nueva crea 8 clientes, 8 cuentas, 10 usuarios y **5 252 transacciones/evaluaciones** (un año de historial). Las cifras siguientes describen cómo se llegó a ese total: 128 operaciones iniciales, 732 de la primera ampliación y 4 392 de la segunda.
+
 **Carga completada y verificada en PostgreSQL el 15 de noviembre de 2026**, en la base `lambda_shield` (PostgreSQL 18.3).
 
 Se confirmaron 8 clientes, 8 cuentas, 10 usuarios activos, 128 transacciones, 128 evaluaciones y 1 024 factores. El historial abarca del 11 de octubre al 14 de noviembre de 2026. Las diez contraseñas documentadas se comprobaron contra sus hashes BCrypt y los ocho saldos coinciden con los movimientos aprobados.
 
-La carga automática quedó desactivada en `.env` (`DEMO_DATASET_ENABLED=false`); los datos ya están persistidos y no requieren volver a simularse.
+Tras una carga se recomienda dejar `DEMO_DATASET_ENABLED=false` (valor por defecto de `.env.example`): los datos quedan persistidos y no requieren volver a simularse.
 
 Los nombres, documentos, correos, números y claves de este archivo son datos ficticios de demostración. Las contraseñas se publican aquí por solicitud explícita y no deben reutilizarse fuera de desarrollo. La contraseña de PostgreSQL no se incluye: permanece en `.env`, excluido de Git.
 
@@ -66,6 +68,8 @@ Cada cuenta conserva sus 16 operaciones originales durante los 35 días anterior
 Desde el 20/11/2026, el loader añade **732 operaciones** a las 128 originales: un ingreso y un egreso por cada uno de los últimos 365 días y hoy (366 fechas), alternando las ocho cuentas demo. Los importes varían por día y cuenta; las categorías incluyen servicios, compras, restaurante y transferencia. Así se llenan los rangos 7d, 15d, 1m, 3m y 1a del gráfico.
 
 La segunda ampliación incorpora otras **4.392 operaciones**: seis ingresos y seis gastos diarios durante las 366 fechas del rango anual. Una carga completa nueva contiene **5.252 transacciones/evaluaciones** y 42.016 factores si las ocho reglas están activas. Con los pesos estándar: 5.228 evaluaciones BAJO, 8 MEDIO, 8 ALTO y 8 CRITICO; 5.236 transacciones aprobadas, 8 retenidas y 8 bloqueadas. Los saldos de la tabla anterior corresponden a la carga inicial: los movimientos añadidos actualizan el saldo mediante el servicio de evaluación, sin restablecerlo.
+
+Desde el 25/11/2026 el motor reparte el puntaje en porcentaje entre las reglas activas. Para conservar un caso MEDIO, uno ALTO y uno CRITICO por cuenta en una carga nueva, la electrónica inusual se registra con dos operaciones previas y la transferencia de riesgo alto con país regional. Una base ya cargada conserva sus evaluaciones anteriores.
 
 Las primeras 16 operaciones mantienen sus identificadores; repetir la carga omite cualquier operación ya existente. Los registros anteriores conservan sus fechas, estados y saldos. La ampliación usa los días relativos a la primera carga ampliada; repetirla no mueve ese historial a fechas nuevas.
 

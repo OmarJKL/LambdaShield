@@ -45,7 +45,10 @@ public class EvaluationApiController {
         if ("CLIENTE".equals(session.getAttribute("rol"))) {
             String codigoCliente = (String) session.getAttribute("codigoCliente");
             if (codigoCliente == null) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+                // Sin cliente activo vinculado no hay permiso: igual que en la política, vuelve al login.
+                session.invalidate();
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .location(java.net.URI.create(httpRequest.getContextPath() + "/login")).build();
             }
             return ResponseEntity.ok(mapper.toResponse(evaluacionTransaccionService.crearYEvaluarCliente(
                     toCommand(request),

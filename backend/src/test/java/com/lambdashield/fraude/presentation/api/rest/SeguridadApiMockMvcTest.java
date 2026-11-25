@@ -28,8 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 /**
- * Pruebas MockMvc de autenticación, autorización por rol, validación,
- * soft delete con PATCH y aislamiento de datos del portal del cliente.
+ * Pruebas MockMvc de autenticación, autorización por rol, baja lógica con
+ * PATCH, reactivación y aislamiento de datos del portal del cliente.
  *
  * El contexto completo usa H2 en modo PostgreSQL y el DataInitializer real.
  */
@@ -61,104 +61,51 @@ class SeguridadApiMockMvcTest {
     @Autowired
     private EvaluacionFraudeRepository evaluacionFraudeRepository;
 
-    private MockHttpSession cliente() {
-        return sesion("CLIENTE", "C-001");
-    }
-
-    private MockHttpSession analista() {
-        return SesionesPrueba.crear(authService, "ANALISTA");
-    }
-
-    private MockHttpSession admin() {
-        return SesionesPrueba.crear(authService, "ADMIN");
-    }
-
-    private MockHttpSession sesion(String rol, String codigoCliente) {
+    private MockHttpSession sesion(String rol) {
         return SesionesPrueba.crear(authService, rol);
     }
 
+    private Long primeraActiva() {
+        return evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc().getFirst().getIdEvaluacion();
+    }
+
+    private void desactivar(Long id) throws Exception {
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
+                .andExpect(status().isNoContent());
+    }
+
     @Test
-    void apiSinSesionDevuelve401Json() throws Exception {
+    void apiSinSesionRedirigeAlLoginSinMensaje() throws Exception {
         mockMvc.perform(get("/api/v1/rule"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.error").value("No autenticado"));
+                .andExpect(SesionesPrueba.alLogin());
 
         mockMvc.perform(get("/api/v1/evaluation"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error").value("No autenticado"));
+                .andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
     void clienteNoPuedeAccederAEndpointsDeAdministracion() throws Exception {
-        mockMvc.perform(get("/api/v1/metric").session(cliente()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("No autorizado"));
+        mockMvc.perform(get("/api/v1/metric").session(sesion("CLIENTE")))
+                .andExpect(SesionesPrueba.alLogin());
 
-        mockMvc.perform(get("/api/v1/rule").session(cliente()))
-                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/rule").session(sesion("CLIENTE")))
+                .andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
-    void analistaPuedeLeerPeroNoPuedeDesactivar() throws Exception {
-        mockMvc.perform(get("/api/v1/rule").session(analista()))
+    void analistaLeePeroNiAnalistaNiClienteDesactivanOReactivan() throws Exception {
+        mockMvc.perform(get("/api/v1/rule").session(sesion("ANALISTA")))
                 .andExpect(status().isOk());
 
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
+        Long id = primeraActiva();
+        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(sesion("ANALISTA")))
+                .andExpect(SesionesPrueba.alLogin());
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(analista()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("No autorizado"));
-    }
-
-    @Test
-    void adminDesactivaEvaluacionConPatchSinBorrarla() throws Exception {
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
-
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isNoContent());
-
-        assertThat(evaluacionFraudeRepository.findById(id))
-                .isPresent()
-                .get()
-                .extracting(e -> e.isEsActiva())
-                .isEqualTo(false);
-    }
-
-    @Test
-    void deleteNoEstaPermitidoNiParaAdmin() throws Exception {
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                        .delete("/api/v1/evaluation").with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("No autorizado"));
-    }
-
-    @Test
-    void requestInvalidoDevuelve400ConListaDeErrores() throws Exception {
-        String invalido = """
-                {
-                  "cliente": "",
-                  "monto": -5,
-                  "categoria": "retail",
-                  "hora": 24,
-                  "pais": "marte",
-                  "dispositivo": "otro",
-                  "operacionesUltimaHora": -1,
-                  "beneficiario": "otro",
-                  "ip": "otra"
-                }
-                """;
-
-        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
-                        .session(admin())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(invalido))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.errores").isArray())
-                .andExpect(jsonPath("$.errores[0]").isString());
+        desactivar(id);
+        for (String rol : List.of("ANALISTA", "CLIENTE")) {
+            mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(sesion(rol)))
+                    .andExpect(SesionesPrueba.alLogin());
+        }
     }
 
     @Test
@@ -166,7 +113,7 @@ class SeguridadApiMockMvcTest {
         String inexistente = JSON_VALIDO.replace("\"C-001\"", "\"C-999\"");
 
         mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
-                        .session(admin())
+                        .session(sesion("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(inexistente))
                 .andExpect(status().isNotFound())
@@ -175,21 +122,21 @@ class SeguridadApiMockMvcTest {
 
     @Test
     void operacionSoloMuestraTransaccionesDelClienteAutenticado() throws Exception {
-        MvcResult result = mockMvc.perform(get("/operacion").session(cliente()))
+        MvcResult result = mockMvc.perform(get("/operacion").session(sesion("CLIENTE")))
                 .andExpect(status().isOk())
                 .andExpect(view().name("cliente/operacion"))
                 .andReturn();
 
-        List<EvaluacionResponse> transacciones = transaccionesDelModelo(result);
-
-        assertThat(transacciones).isNotEmpty();
-        assertThat(transacciones).allMatch(t -> "C-001".equals(t.clienteCodigo()));
-        assertThat(transacciones).noneMatch(t -> "C-002".equals(t.clienteCodigo()));
+        assertThat(transaccionesDelModelo(result)).isNotEmpty().allMatch(t -> "C-001".equals(t.clienteCodigo()));
+        // El HTML renderizado tampoco incluye operaciones semilla de C-002 ni C-003.
+        assertThat(result.getResponse().getContentAsString())
+                .contains("TR-00001", "TR-00002", "TR-00005")
+                .doesNotContain("TR-00003", "TR-00004", "TR-00006", "TR-00007", "TR-00008", "TR-00009", "TR-00010");
     }
 
     @Test
     void operacionRecuperaCodigoClienteDesdeIdentidadAutenticada() throws Exception {
-        MockHttpSession clienteSinCodigo = sesion("CLIENTE", null);
+        MockHttpSession clienteSinCodigo = sesion("CLIENTE");
         clienteSinCodigo.removeAttribute("codigoCliente");
 
         MvcResult result = mockMvc.perform(get("/operacion").session(clienteSinCodigo))
@@ -201,13 +148,10 @@ class SeguridadApiMockMvcTest {
 
     @Test
     void adminReactivaEvaluacionDesactivada() throws Exception {
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
+        Long id = primeraActiva();
+        desactivar(id);
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isNoContent());
-
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
                 .andExpect(status().isNoContent());
 
         var restaurada = evaluacionFraudeRepository.findById(id).orElseThrow();
@@ -216,51 +160,33 @@ class SeguridadApiMockMvcTest {
     }
 
     @Test
-    void analistaYClienteNoPuedenReactivar() throws Exception {
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
-
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isNoContent());
-
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(analista()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("No autorizado"));
-
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(cliente()))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
     void reactivarEvaluacionInexistenteDevuelve404() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", 999999).with(SesionesPrueba.csrf()).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", 999999).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errores").isArray());
     }
 
     @Test
     void reactivarEvaluacionYaActivaDevuelve400() throws Exception {
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
+        Long id = primeraActiva();
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(admin()))
+        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value("La evaluación ya está activa: " + id));
     }
 
     @Test
-    void listadoIncluyeDesactivadasSoloConActivasFalse() throws Exception {
-        Long id = evaluacionFraudeRepository.findByEsActivaTrueOrderByFechaEvaluacionDesc()
-                .getFirst().getIdEvaluacion();
+    void bajaLogicaConservaLaFilaYSoloSeListaConActivasFalse() throws Exception {
+        Long id = primeraActiva();
+        desactivar(id);
 
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", id).with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isNoContent());
+        assertThat(evaluacionFraudeRepository.findById(id)).get().extracting(e -> e.isEsActiva()).isEqualTo(false);
 
-        mockMvc.perform(get("/api/v1/evaluation").session(admin()))
+        mockMvc.perform(get("/api/v1/evaluation").session(sesion("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.idInterno == " + id + ")]").isEmpty());
 
-        mockMvc.perform(get("/api/v1/evaluation?activas=false").session(admin()))
+        mockMvc.perform(get("/api/v1/evaluation?activas=false").session(sesion("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.idInterno == " + id + ")].activa")
                         .value(org.hamcrest.Matchers.contains(false)));

@@ -11,6 +11,19 @@
 
     const escapeHtml = LSUi.escapeHtml;
 
+    function validarClave(campo) {
+        const clave = campo.value;
+        const valida = (!campo.required && !clave) || (clave.trim().length > 0
+            && [...clave].length >= 8 && new TextEncoder().encode(clave).length <= 72);
+        campo.setCustomValidity(valida ? '' : 'La clave debe tener al menos 8 caracteres y como máximo 72 bytes UTF-8.');
+        return valida;
+    }
+
+    ['usuarioClave', 'claveNueva'].forEach(id => {
+        const campo = document.getElementById(id);
+        campo.addEventListener('input', () => validarClave(campo));
+    });
+
     function colorEstado(estado) {
         if (estado === 'ACTIVO') return 'var(--riesgo-bajo)';
         if (estado === 'BLOQUEADO') return 'var(--utp-rojo)';
@@ -63,8 +76,11 @@
         document.getElementById('usuarioModalTitulo').textContent = 'Nuevo usuario';
         document.getElementById('usuarioNombre').readOnly = false;
         document.getElementById('grupoClave').classList.remove('d-none');
+        // El alta siempre crea usuarios ACTIVO; el estado solo se edita después.
+        document.getElementById('grupoEstado').classList.add('d-none');
         document.getElementById('usuarioClave').required = true;
         document.getElementById('usuarioClave').value = '';
+        document.getElementById('usuarioClave').setCustomValidity('');
         document.getElementById('usuarioNombre').value = '';
         document.getElementById('usuarioNombres').value = '';
         document.getElementById('usuarioCorreo').value = '';
@@ -79,7 +95,10 @@
         document.getElementById('usuarioModalTitulo').textContent = 'Editar usuario: ' + u.usuario;
         document.getElementById('usuarioNombre').readOnly = true;
         document.getElementById('grupoClave').classList.add('d-none');
+        document.getElementById('grupoEstado').classList.remove('d-none');
         document.getElementById('usuarioClave').required = false;
+        document.getElementById('usuarioClave').value = '';
+        document.getElementById('usuarioClave').setCustomValidity('');
         document.getElementById('usuarioNombre').value = u.usuario;
         document.getElementById('usuarioNombres').value = u.nombres;
         document.getElementById('usuarioCorreo').value = u.correo;
@@ -93,6 +112,7 @@
         editandoId = u.id;
         document.getElementById('claveModalUsuario').textContent = 'Usuario: ' + u.usuario;
         document.getElementById('claveNueva').value = '';
+        document.getElementById('claveNueva').setCustomValidity('');
         modal('claveModal').show();
     }
 
@@ -107,10 +127,11 @@
 
     LSApi.escucharAccion(document.getElementById('formUsuario'), 'submit', async (e) => {
         e.preventDefault();
+        const clave = document.getElementById('usuarioClave');
+        if (editandoId === null && !validarClave(clave)) { clave.reportValidity(); return; }
         const payload = {
             nombres: document.getElementById('usuarioNombres').value,
             correo: document.getElementById('usuarioCorreo').value,
-            estado: document.getElementById('usuarioEstado').value,
             rol: document.getElementById('usuarioRol').value,
             codigoCliente: document.getElementById('usuarioCodigoCliente').value || null
         };
@@ -128,7 +149,7 @@
             : LSApi.json('/api/v1/user/' + editandoId, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ ...payload, estado: document.getElementById('usuarioEstado').value })
             }));
 
         LSApi.mostrarAviso(editandoId === null ? 'Usuario creado.' : 'Usuario actualizado.');
@@ -138,6 +159,8 @@
 
     LSApi.escucharAccion(document.getElementById('formClave'), 'submit', async (e) => {
         e.preventDefault();
+        const clave = document.getElementById('claveNueva');
+        if (!validarClave(clave)) { clave.reportValidity(); return; }
         await LSApi.json('/api/v1/user/' + editandoId + '/clave', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },

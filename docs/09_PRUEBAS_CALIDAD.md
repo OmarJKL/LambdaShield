@@ -6,7 +6,7 @@
 
 La suite combina pruebas unitarias de reglas, integración Spring/MockMvc, consistencia de persistencia, transacciones concurrentes, políticas de acceso y arquitectura. El frontend usa `node:test` con un DOM de prueba mínimo y sin dependencias npm.
 
-En los reportes locales disponibles al verificar el 17 de noviembre de 2026 hay **122 verificaciones Java sin fallos**, incluidas seis reglas ArchUnit, y se verificaron **17 pruebas JavaScript**. Son conteos del estado revisado; pueden cambiar al añadir casos. El conjunto ampliado se añadió y se verificó con una ejecución limpia de las 122 pruebas. El 15 de noviembre de 2026 se ejecutó además su carga real en PostgreSQL 18.3: se comprobaron los 128 registros, factores, saldos, roles y las diez credenciales. Esta verificación de carga no equivale a ejecutar toda la suite Java sobre PostgreSQL.
+La ejecución limpia del 25 de noviembre de 2026 (`mvnw clean test` con JDK 21) pasó **166 verificaciones Java sin fallos**, incluidas seis reglas ArchUnit, y `node --test` pasó **40 pruebas JavaScript**. Son conteos del estado revisado; pueden cambiar al añadir casos. Las secciones fechadas al final conservan los conteos de su momento como historial. El 15 de noviembre de 2026 se ejecutó además su carga real en PostgreSQL 18.3: se comprobaron los 128 registros, factores, saldos, roles y las diez credenciales. Esta verificación de carga no equivale a ejecutar toda la suite Java sobre PostgreSQL.
 
 ## 2. Comandos
 
@@ -95,9 +95,9 @@ No prueba idempotencia de creación ni todos los patrones de bloqueo de PostgreS
 
 ### Contratos y vistas
 
-Las suites de validación, usuarios, portal, dashboard y reportes verifican las respuestas públicas y escenarios concretos de negocio. Las pruebas de salud verifican el estado agregado sin detalles. `OperacionClienteViewMockMvcTest` renderiza la plantilla y comprueba que no incluya operaciones de otros clientes.
+Las suites de validación, usuarios, portal, dashboard y reportes verifican las respuestas públicas y escenarios concretos de negocio. Las pruebas de salud verifican el estado agregado sin detalles. `SeguridadApiMockMvcTest` renderiza la plantilla del portal y comprueba, en el modelo y en el HTML, que no incluya operaciones de otros clientes.
 
-`DatasetDemoLoaderTest` verifica además la carga ampliada: 128 operaciones, saldos de las ocho cuentas, los cuatro niveles, las diez credenciales y repetición sin duplicación ni sobrescritura de claves, bloqueos o reversos posteriores.
+`DatasetDemoLoaderTest` verifica además la carga ampliada: 5 252 operaciones, saldos de las ocho cuentas, los cuatro niveles, las diez credenciales y repetición sin duplicación ni sobrescritura de claves, bloqueos o reversos posteriores.
 
 ## 5. Arquitectura
 
@@ -120,8 +120,8 @@ Estas reglas no impiden cualquier diseño incorrecto ni prueban todos los detall
 
 1. Mensaje de validación JSON conservado.
 2. Respuesta 204 sin intento de leer un body JSON.
-3. Redirección por 401 y marca de error gestionado.
-4. Una sola notificación por 403.
+3. Redirección al login por 401 y marca de error gestionado.
+4. Redirección del servidor o 403: vuelve al login sin notificación y sin seguir la redirección en `fetch`.
 5. Escape de HTML, formato monetario y saldo cero.
 6. Saldo de portal tomado del servidor incluso cuando queda en cero.
 7. Encabezado CSRF en escrituras y cookies del mismo origen.
@@ -198,3 +198,32 @@ La suite incorpora el adaptador OpenRouter con transporte simulado, validación 
 ## Revisión de congruencia — 18/11/2026
 
 La ejecución completa final pasó **137 pruebas Java** sin fallos, errores ni omisiones; las **23 pruebas JavaScript** también pasaron. Se verificaron la prohibición de abonos desde el portal, rechazo de beneficiarios inactivos por nombre, objetivo opcional y límite de ratio del formulario IA, JSON duplicado/concatenado y concurrencia de lectura/refresco en campana. Se regeneró el archivo de cobertura para evitar mezclar bytecode de compilaciones anteriores. No se llamó a Alibaba durante esta revisión. [Hallazgos y pendientes](13_REVISION_CONGRUENCIA_CODIGO.md).
+
+## Consolidación de pruebas y correcciones — 24/11/2026
+
+Antes de corregir el código se revisaron todas las suites para detectar casos duplicados o redundantes:
+
+| Cambio | Motivo |
+| --- | --- |
+| Se eliminó `FraudeApplicationTests.contextLoads` | Cada prueba `@SpringBootTest` ya carga el contexto completo |
+| Se eliminó `OperacionClienteViewMockMvcTest` | Repetía la prueba de aislamiento del portal; su comprobación del HTML se integró en `SeguridadApiMockMvcTest` |
+| `SeguridadApiMockMvcTest`: se quitaron DELETE no permitido, request inválido y desactivación aislada; se unieron los dos casos de permisos de analista/cliente | Ya cubiertos por `ProteccionApiMockMvcTest`, `ValidacionApiMockMvcTest` y la prueba de listado con `activas=false` |
+| `ValidacionApiMockMvcTest`: seis casos de un campo y dos de ID no positivo pasan a pruebas parametrizadas; se quitaron los dos «sigue funcionando» | Misma aserción repetida; los casos válidos ya los ejercitan otras suites |
+| `PortalClienteApiMockMvcTest`: se quitó «bloqueada no descuenta saldo» | `NotificacionesApiMockMvcTest` comprueba lo mismo junto con el aviso |
+| `ReporteApiMockMvcTest`: CSV, XLSX y PDF en una prueba parametrizada; el filtro por cliente ahora comprueba el titular | Antes solo contaba líneas y no verificaba el filtro |
+| `AuthorizationPolicyTest`: se quitó una aserción repetida y se añadieron estado de reglas, asistente, cuenta destino y bandeja | Rutas sin prueba unitaria de política |
+| `DeteccionFraudeServiceTest`: suma y tope en una prueba | Mismo método con dos entradas |
+| `SesionesPrueba.deUsuario` | `NotificacionesApiMockMvcTest` duplicaba la creación de sesiones |
+
+Pruebas nuevas de las correcciones: peso inválido no activable y catálogo visible; última regla activa; auditoría de cambios de regla; 409 al eliminar un usuario con auditoría; categoría inexistente desde el portal; cuenta destino con o sin guiones; primera cuenta activa y cliente sin cuenta activa; hora posterior registrada el día anterior; confirmación y mensaje del servidor en `/reglas`; estado oculto en el alta de usuarios.
+
+Resultado: **156 pruebas Java** y **35 JavaScript**, sin fallos ni omisiones. Detalle en [la revisión de congruencia](13_REVISION_CONGRUENCIA_CODIGO.md).
+
+## Reglas definidas y reparto porcentual — 25/11/2026
+
+- `ReglaDefinidaEvaluadorTest`: fronteras de cada operador, TODAS/CUALQUIERA, proporción sin promedio, serialización y definiciones dañadas.
+- `ReglasDefinidasApiMockMvcTest`: alta inactiva con código consecutivo y auditoría; validación, rol y CSRF; reparto porcentual al activar, crear y desactivar; ejecución de la RC en el motor e historial intacto; prueba sin guardar con candidatas y borrador sin persistir nada; límites de la prueba; RC con definición dañada no activable.
+- `AuthorizationPolicyTest`: POST de reglas y de pruebas exclusivos de ADMIN.
+- JavaScript: modal de confirmación con reparto antes/después al activar y desactivar, cancelación sin envío, guardar y probar desde el asistente, participación estimada, modo de prueba del simulador con candidatas/borrador y lote de 50 escenarios en una solicitud.
+
+Se ajustaron a la nueva escala `ConsistenciaAplicacionTest` (RF002 con peso 30 aporta 16), el escenario de retención de `NotificacionesApiMockMvcTest` y la carga demo verificada por `DatasetDemoLoaderTest`. Resultado: **166 pruebas Java** y **40 JavaScript**, sin fallos.

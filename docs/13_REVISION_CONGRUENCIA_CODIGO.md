@@ -52,4 +52,55 @@ No deben mezclarse cambios de configuración del motor con la baja de una operac
 
 ## Resultado de verificación
 
-La ejecución completa final y sus reportes se encuentran en `target/surefire-reports` y `target/site/jacoco`. Las pruebas JavaScript se ejecutan con `node --test frontend/tests/*.test.cjs`. Resultado comprobado: **137 pruebas Java y 23 JavaScript, todas correctas**. Se regeneró la cobertura sin mezclar ejecuciones de versiones previas.
+La ejecución completa final y sus reportes se encuentran en `target/surefire-reports` y `target/site/jacoco`. Las pruebas JavaScript se ejecutan con `node --test frontend/tests/*.test.cjs`. Resultado comprobado el 18/11: **137 pruebas Java y 23 JavaScript, todas correctas**. Ver la segunda revisión para el estado actual. Se regeneró la cobertura sin mezclar ejecuciones de versiones previas.
+
+## Segunda revisión — 24/11/2026
+
+Se contrastaron los documentos con el código y se corrigieron los flujos incompletos encontrados.
+
+### Código
+
+| Hallazgo | Corrección | Prueba |
+| --- | --- | --- |
+| Activar una regla no validaba su peso: con un peso no entero, todas las evaluaciones posteriores respondían 500 | `EstadoReglaService` valida implementación y peso entero 0–100 antes de activar (400) | `pesoInvalidoNoSeActivaNiImpideVerElCatalogo` |
+| `/reglas` respondía 500 si cualquier regla, incluso inactiva, tenía peso inválido | `ReglaConsultaService` devuelve `pesoMaximo` nulo y la vista muestra «Peso inválido» | Misma prueba |
+| Se podían desactivar todas las reglas: el puntaje quedaba en 0 y todo se aprobaba, sin confirmación ni registro | Mínimo de una regla activa, bloqueo del catálogo, registro en `auditoria` y confirmación en la interfaz, que ahora muestra el motivo del rechazo | `noSePuedeDesactivarLaUltimaReglaActiva`, `cadaCambioRealQuedaAuditadoConSuAutor`, prueba JS |
+| Eliminar un usuario con auditoría, alertas o casos respondía 500 | `flush` dentro del caso de uso y `DataIntegrityViolationException` → 409 | `usuarioConHistorialAuditadoNoSeEliminaYResponde409` |
+| El portal creaba un `tipo_transaccion` por cada categoría desconocida | Para CLIENTE la categoría debe existir y estar activa (400); ADMIN y la carga demo conservan el catálogo abierto | `clienteNoPuedeCrearCategoriasNuevasDesdeElPortal` |
+| `0011-0145-…` y `00110145…` se trataban como cuentas distintas | Comparación sin espacios ni guiones en cuenta interna, contactos y consulta de titular; el contacto guarda el formato de la cuenta | `cuentaDestinoSeReconoceConOSinGuionesSinDuplicarElContacto` |
+| Si la primera cuenta estaba inactiva, se rechazaba con 500 y «no tiene una cuenta registrada» aunque existiera otra activa | Se usa la primera cuenta ACTIVA; sin ninguna, 400 «no tiene una cuenta activa» | `operacionUsaLaPrimeraCuentaActivaYSinCuentaActivaSeRechazaCon400` |
+| El simulador registraba transacciones con fecha futura | Una hora posterior a la actual se registra el día anterior | `horaDeclaradaPosteriorALaActualSeRegistraElDiaAnterior` |
+| El alta de usuarios mostraba un selector de estado que el servidor ignoraba | El selector solo aparece al editar | Prueba JS de usuarios |
+
+Las cuentas de usuario que hayan cambiado el estado de una regla quedan referenciadas por `auditoria`: ya no se pueden eliminar (409) y deben bloquearse. Es el comportamiento esperado de un registro de auditoría.
+
+### Documentación
+
+Se unificó el tamaño de la carga demo (5 252 operaciones), se actualizaron conteos de pruebas y fechas, se resolvió la contradicción de `02` sobre administración de reglas, se completaron las tablas de permisos y endpoints (`06`, `07`, README), se alineó la política de claves (72 bytes UTF-8) y se reparó la tabla del índice.
+
+### Pendiente
+
+Siguen abiertos los puntos de la tabla «Trabajo recomendado siguiente»: identidad del destino por banco y cuenta, frecuencia bajo concurrencia, cálculos con `double`, fechas de avisos en la carga demo, catálogo del asistente, paginación de listados y reglas dinámicas.
+
+Resultado: **156 pruebas Java y 35 JavaScript**, todas correctas, con `mvnw clean test` sobre JDK 21 y H2.
+
+## Reglas definidas y reparto porcentual — 25/11/2026
+
+| Cambio | Detalle | Prueba |
+| --- | --- | --- |
+| Guardar una regla desde el formulario | `POST /api/v1/rule` crea RCnnn inactiva con la definición del administrador en `parametros_json` y la audita | `ReglasDefinidasApiMockMvcTest`, prueba JS del asistente |
+| Motor con reglas RC | `ReglaDefinidaEvaluador` interpreta campos y operadores cerrados; `CatalogoReglasService` ejecuta RF y RC | `ReglaDefinidaEvaluadorTest`, `elMotorEjecutaLaReglaDefinida…` |
+| Reparto porcentual | Máximo = peso ÷ suma de activas × 100; activar, desactivar o crear reajusta al resto (`versionModelo` 2.0) | `activarDesactivarOAgregarReglasReparteDeNuevoElPorcentaje` |
+| Probar sin guardar | `POST /api/v1/rule/simulation` compara vigente y candidatas/borrador sin persistir; el campo de desarrolladores usa este modo por defecto y prueba lotes de 50 | `probarSinGuardar…`, pruebas JS del simulador |
+| Confirmación al activar o desactivar | Modal con la participación antes y después | Pruebas JS de `/reglas` |
+
+Efecto de la nueva escala: las mismas señales producen puntajes menores que con la suma con tope. Se ajustaron tres pruebas a la escala o a la nueva API del catálogo y dos operaciones del conjunto demo para conservar un caso MEDIO, uno ALTO y uno CRITICO por cuenta. Las evaluaciones históricas no se recalculan.
+
+Pendiente: editar o versionar una RC, severidad graduada en RC (hoy binaria) y aviso automático de señales repetidas entre RC y RF.
+
+Resultado: **166 pruebas Java y 40 JavaScript**, todas correctas (`mvnw clean test` con JDK 21 y `node --test`).
+
+## Acceso denegado en APIs — 25/11/2026
+
+Sin identidad válida, sin permiso o con CSRF inválido, toda ruta `/api/**` responde con una redirección 302 a `/login` sin cuerpo ni mensaje, y cierra la sesión si existía (el login devuelve a su inicio a quien sigue autenticado). `LSApi.fetch` usa `redirect: manual` y lleva la página completa al login sin avisos. Las páginas conservan su comportamiento: sin sesión van al login y con un rol sin acceso, a la página de inicio de su rol. Pruebas: matcher `SesionesPrueba.alLogin()` en las suites MockMvc y prueba JS de redirección silenciosa.
+

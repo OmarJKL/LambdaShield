@@ -106,7 +106,43 @@
             seccion('Casos de prueba sugeridos — pendientes de ejecutar', datos.revision.pruebas));
         resultado.hidden = false;
     }
+    /** Participación que tendría la regla si se activara junto a las activas actuales. */
+    function actualizarParticipacion() {
+        const ayuda = $('iaParticipacion');
+        if (!ayuda) return;
+        const activas = Array.from(document.querySelectorAll?.('[data-fila-regla]') || [])
+            .filter(f => f.dataset.activa === 'true').map(f => Number.parseInt(f.dataset.peso, 10))
+            .filter(p => Number.isInteger(p) && p >= 0 && p <= 100);
+        const propio = Number($('iaPuntos').value);
+        if (!Number.isInteger(propio) || propio < 1 || propio > 100) { ayuda.textContent = 'Entero entre 1 y 100.'; return; }
+        const suma = activas.reduce((total, p) => total + p, 0) + propio;
+        ayuda.textContent = `Activa, aportaría hasta ${(Math.round(propio * 1000 / suma) / 10).toFixed(1)} % del puntaje; las demás reglas se reajustan.`;
+    }
     $('iaAgregar').addEventListener('click', () => { agregar(); invalidar(); });
+    $('iaPuntos').addEventListener('input', actualizarParticipacion);
+    // Guardar no depende de OpenRouter: se publica la definición del administrador, inactiva.
+    $('iaGuardar')?.addEventListener('click', async () => {
+        if (ocupado || !$('formAsistenteReglas').reportValidity()) return;
+        ocupado = true; $('iaGuardar').disabled = true; actualizarBotones();
+        $('iaMensaje').textContent = 'Guardando la regla…';
+        try {
+            const regla = await LSApi.json('/api/v1/rule', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(definicion()) });
+            $('iaMensaje').textContent = `${regla.codigo} guardada inactiva.`;
+            window.location.assign('/reglas?creada=' + encodeURIComponent(regla.codigo));
+        } catch (error) {
+            $('iaMensaje').textContent = error.gestionado ? 'No se pudo guardar la regla.' : error.message;
+        } finally { ocupado = false; $('iaGuardar').disabled = false; actualizarBotones(); }
+    });
+    // Probar sin guardar: el borrador viaja al campo de desarrolladores en esta pestaña.
+    $('iaProbar')?.addEventListener('click', () => {
+        if (!$('formAsistenteReglas').reportValidity()) return;
+        try { sessionStorage.setItem('ls.reglaBorrador', JSON.stringify(definicion())); } catch {
+            $('iaMensaje').textContent = 'El navegador no permite guardar el borrador temporal; guárdalo como regla inactiva para probarlo.';
+            return;
+        }
+        window.location.assign('/simulador?borrador=1');
+    });
     $('iaExportar').addEventListener('click', () => {
         if (!revision) return;
         const contenido = { esquema: 'lambda-shield-regla-borrador-v1', fecha: new Date().toISOString(),
@@ -139,6 +175,7 @@
         } finally { ocupado = false; $('iaRevisar').disabled = false; actualizarBotones(); }
     });
     agregar('RATIO_PROMEDIO', '3'); agregar('DISPOSITIVO', 'nuevo');
+    actualizarParticipacion();
     LSApi.json('/api/v1/rule/assistant/status').then(datos => {
         $('estadoAsistente').textContent = datos.disponible ? 'Configurado' : 'Configuración pendiente';
         $('iaRevisar').disabled = !datos.disponible;

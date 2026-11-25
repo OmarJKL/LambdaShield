@@ -40,6 +40,21 @@ public class OpenRouterAsistenteReglas implements AsistenteReglasPort {
         interpretacion máximo 1500 caracteres. Propón al menos dos pruebas, incluyendo frontera y caso negativo.
         Sugerencias son opcionales y separadas del original. No afirmes haber implementado, validado o activado la regla.
         """;
+    /**
+     * Esquema estricto (structured outputs): json_object solo garantiza JSON válido y algunos modelos
+     * devolvían únicamente "interpretacion". La validación Java de interpretar() se mantiene como segunda barrera.
+     */
+    private static final Map<String, Object> FORMATO_RESPUESTA = Map.of("type", "json_schema", "json_schema", Map.of(
+            "name", "revision_regla", "strict", true, "schema", Map.of(
+                    "type", "object", "additionalProperties", false,
+                    "required", List.of("interpretacion", "advertencias", "sugerencias", "pruebas"),
+                    "properties", Map.of(
+                            "interpretacion", Map.of("type", "string", "maxLength", 1500),
+                            "advertencias", lista(0), "sugerencias", lista(0), "pruebas", lista(2)))));
+
+    private static Map<String, Object> lista(int minimo) {
+        return Map.of("type", "array", "minItems", minimo, "maxItems", 6, "items", Map.of("type", "string", "maxLength", 500));
+    }
     private final boolean enabled;
     private final String key, baseUrl, model;
     private final Duration timeout;
@@ -84,7 +99,7 @@ public class OpenRouterAsistenteReglas implements AsistenteReglasPort {
         if (!solicitudes.tryAcquire()) throw new AsistenteReglasException("El asistente está ocupado. Inténtalo en unos segundos.", true);
         try {
             var body = new LinkedHashMap<String, Object>(Map.of("model", model, "stream", false, "max_tokens", 1600,
-                    "response_format", Map.of("type", "json_object"), "messages", List.of(
+                    "response_format", FORMATO_RESPUESTA, "messages", List.of(
                             Map.of("role", "system", "content", PROMPT),
                             Map.of("role", "user", "content", json.writeValueAsString(definicion)))));
             if (disableThinking) body.put("reasoning", Map.of("enabled", false));

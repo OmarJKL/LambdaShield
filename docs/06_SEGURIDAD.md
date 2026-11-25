@@ -22,13 +22,18 @@ El procesamiento interno de errores tiene una excepción por tipo de despacho. E
 | POST de evaluación | Sí, señales manuales | No | Sí, cliente y señales derivados |
 | PATCH de evaluación/reactivación | Sí | No | No |
 | GET/HEAD de métricas, reglas y exportación | Sí | Sí | No |
+| PATCH de estado de regla (`/rule/{codigo}/estado`) | Sí | No | No |
+| POST de regla definida (`/rule`) y prueba sin guardar (`/rule/simulation`) | Sí | No | No |
+| Asistente IA (`/rule/assistant/*`) | Sí | No | No |
+| Titular de cuenta destino (`/account/destination`) | No | No | Sí |
+| Bandeja de avisos (`/notification`) | No | No | Sí |
 | Gestión `/user` | Sí, métodos declarados | No | No |
 | DELETE de evaluaciones | No | No | No |
 | Ruta o método no declarado | No | No | No |
 
 HEAD se admite en las rutas de lectura API expresamente declaradas. OPTIONS no tiene una autorización general de API ni se habilita CORS para otro origen.
 
-Los IDs de rutas administrativas deben tener la forma admitida por la política. Un ID numérico no positivo llega a validación y puede devolver 400; uno no numérico puede ser rechazado con 403 antes de llegar al controlador. El firewall rechaza formas ambiguas como rutas con punto y coma.
+Los IDs de rutas administrativas deben tener la forma admitida por la política. Un ID numérico no positivo llega a validación y puede devolver 400; uno no numérico se rechaza antes de llegar al controlador, como cualquier ruta no autorizada (redirección al login). El firewall rechaza formas ambiguas como rutas con punto y coma.
 
 ## 3. Autenticación
 
@@ -72,12 +77,12 @@ Se utiliza el repositorio de token de sesión y el manejo enmascarado de Spring 
 - Resuelve la URL y exige el mismo origen.
 - Lee las etiquetas CSRF para escrituras y añade el encabezado indicado.
 - Envía cookies con `credentials: same-origin`.
-- Redirige a login ante 401 y presenta un aviso ante 403.
+- No sigue redirecciones dentro de `fetch` (`redirect: manual`): ante la redirección del servidor, o un 401/403, envía la página completa a `/login` sin mostrar avisos.
 - No envía el token a un destino externo.
 
 El token no sustituye la cookie autenticada. Un token de otra sesión no sirve. Tras login debe usarse un token renovado; un cliente HTTP debe conservar la cookie y volver a obtener el token desde una página protegida.
 
-Si falta CSRF, puede recibirse 403 incluso sin sesión autenticada, antes de llegar a autorización. Nunca se debe desactivar CSRF solo para facilitar una prueba de POST con cookies.
+En una API, si falta CSRF o no es válido se cierra la sesión y se redirige al login, incluso antes de llegar a autorización. En formularios de página (login, logout) se responde 403. Nunca se debe desactivar CSRF solo para facilitar una prueba de POST con cookies.
 
 ## 6. Aislamiento de cliente y validación
 
@@ -111,7 +116,7 @@ Configuración mediante `LOGIN_RATE_LIMIT`, `API_RATE_LIMIT` y `API_WRITE_RATE_L
 | Seguimiento de sesión | Cookie, sin identificadores en URL |
 | `HttpOnly` | Activado |
 | `SameSite` | Lax |
-| `Secure` | Variable `SESSION_COOKIE_SECURE`, false para desarrollo HTTP |
+| `Secure` | True por defecto; false en el perfil `dev`; obligatorio en `prod` |
 | Caché de respuestas sensibles | Cabeceras de Spring Security con `no-store` |
 | Marcos | `X-Frame-Options: DENY` y CSP `frame-ancestors 'none'` |
 | Interpretación de MIME | `X-Content-Type-Options: nosniff` |
@@ -120,15 +125,19 @@ Configuración mediante `LOGIN_RATE_LIMIT`, `API_RATE_LIMIT` y `API_WRITE_RATE_L
 
 La CSP permite scripts del mismo origen y jsDelivr; estilos del mismo origen, jsDelivr y Google Fonts, con estilos inline para las plantillas actuales. Restringe conexiones a self y bloquea objetos, marcos y formularios a otros destinos. Las dependencias CDN siguen siendo una dependencia externa de la interfaz.
 
-En HTTPS se debe configurar `SESSION_COOKIE_SECURE=true`. Si TLS termina en un proxy, hay que comprobar qué entiende el servidor por conexión segura; no se debe aceptar cualquier encabezado de proxy sin una frontera de confianza definida.
+El perfil `prod` exige HTTPS mediante Spring Security y fija cookies Secure. El perfil `dev` permite HTTP local. Si TLS termina en un proxy, configura explícitamente su frontera de confianza para que el servidor reconozca la conexión segura; de otro modo se pueden producir redirecciones repetidas. No se aceptan automáticamente encabezados de proxy enviados por cualquier origen. El operador debe configurar TLS y los proxies confiables en su despliegue.
 
 ## 9. Errores y datos expuestos
 
-Los filtros usan `{"error":"..."}`; la validación y excepciones de aplicación suelen usar `{"errores":[...]}`. Las APIs privadas no redirigen a un formulario HTML por falta de autenticación: reciben 401, salvo un rechazo anterior como CSRF o límite.
+Las APIs no devuelven 401 ni 403: sin identidad válida, sin permiso o con CSRF inválido responden con una redirección 302 a `/login`, sin cuerpo ni mensaje. Si existía una sesión se invalida, porque el login envía a su inicio a quien sigue autenticado. La validación y las excepciones de aplicación usan `{"errores":[...]}`; el límite de solicitudes responde 429 con `{"error":"..."}`. Como el navegador no envía la cookie en solicitudes entre sitios (SameSite=Lax), otro sitio solo podría provocar ese cierre de sesión mediante una navegación directa a una URL de API.
 
-El manejador de errores internos devuelve un mensaje genérico en la API. La configuración evita incluir stacktraces, mensajes de servidor y errores de binding en la respuesta estándar de Spring Boot. Esto no significa que toda página de error de aplicación tenga exactamente el mismo formato o cuerpo.
+El manejador de errores inesperados responde 500 con un mensaje genérico tanto en la API como en las páginas. El detalle de la excepción se registra en el servidor. La configuración evita incluir stacktraces, mensajes de servidor y errores de binding en la respuesta estándar de Spring Boot.
 
-No deben registrarse cookies, tokens CSRF, claves ni cuerpos con información personal innecesaria. La configuración actual muestra SQL en desarrollo; el despliegue puede desactivarlo mediante configuración.
+No deben registrarse cookies, tokens CSRF, claves ni cuerpos con información personal innecesaria. Solo el perfil `dev` muestra SQL; la configuración base y `prod` lo desactivan. Protege el acceso y la retención de los logs internos.
+
+Las altas y cambios de clave exigen al menos ocho caracteres Unicode y como máximo 72 bytes UTF-8, límite de BCrypt. La misma política se aplica en DTO, interfaz y servicio. El login rechaza entradas de más de 72 bytes para impedir que un sufijo adicional coincida por truncamiento.
+
+Las altas, cambios de rol/estado y eliminaciones de usuarios toman un bloqueo pesimista sobre la fila del rol ADMIN antes de leer o modificar usuarios. El bloqueo se conserva hasta confirmar o revertir la transacción y coordina distintas instancias que comparten PostgreSQL. Así, dos solicitudes no pueden retirar simultáneamente a los últimos administradores. Los cambios directos en la base deben respetar esta misma regla.
 
 ## 10. Datos demo y límites de la protección
 
@@ -149,3 +158,7 @@ Las rutas del asistente requieren ADMIN y las revisiones POST requieren CSRF. El
 ## Naturaleza financiera del portal
 
 `crearYEvaluarCliente` rechaza tipos de naturaleza CREDITO antes de evaluar o modificar dinero. La categoría del cuerpo HTTP no puede convertir la operación del cliente en un abono. Los ingresos demo y las pruebas administrativas usan el flujo separado autorizado. Los beneficiarios desactivados tampoco pueden reutilizarse omitiendo la cuenta y enviando solo su nombre.
+
+## Reglas definidas y pruebas sin guardar
+
+`POST /api/v1/rule` y `POST /api/v1/rule/simulation` requieren ADMIN y CSRF y cuentan para el límite de escrituras. La definición se valida otra vez en el servidor; campos, operadores y valores pertenecen a listas cerradas y se interpretan en Java, nunca como expresiones. La regla se crea inactiva y su alta queda en `auditoria`. La prueba es de solo lectura: no crea transacciones, evaluaciones, contactos, dispositivos ni categorías.

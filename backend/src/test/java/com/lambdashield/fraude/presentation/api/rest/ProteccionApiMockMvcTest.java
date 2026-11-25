@@ -45,17 +45,17 @@ class ProteccionApiMockMvcTest {
         MockHttpSession falsa = new MockHttpSession();
         falsa.setAttribute("usuario", "admin");
         falsa.setAttribute("rol", "ADMIN");
-        mvc.perform(get("/api/v1/user").session(falsa)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/user").session(falsa)).andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
     void csrfAusenteOInvalidoImpideEscriturasSinCrearEvaluaciones() throws Exception {
         long antes = evaluaciones.count();
         mvc.perform(post("/api/v1/evaluation").session(admin()).contentType(MediaType.APPLICATION_JSON).content(OPERACION))
-                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Token CSRF ausente o inválido"));
+                .andExpect(SesionesPrueba.alLogin());
         mvc.perform(post("/api/v1/evaluation").session(admin()).header("X-CSRF-TOKEN", "falso")
                         .contentType(MediaType.APPLICATION_JSON).content(OPERACION))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
         assertThat(evaluaciones.count()).isEqualTo(antes);
     }
 
@@ -65,7 +65,7 @@ class ProteccionApiMockMvcTest {
         CsrfToken token = (CsrfToken) pagina.getRequest().getAttribute("_csrf");
         mvc.perform(post("/api/v1/evaluation").session(admin()).header(token.getHeaderName(), token.getToken())
                         .contentType(MediaType.APPLICATION_JSON).content(OPERACION))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
@@ -76,14 +76,14 @@ class ProteccionApiMockMvcTest {
         mvc.perform(post("/api/v1/evaluation").session(sesion).with(SesionesPrueba.csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(OPERACION))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.clienteCodigo").value("C-001"));
-        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
     void usuarioBloqueadoPierdeAccesoConSesionAbierta() throws Exception {
         var sesion = admin();
         cuentas.findByNombreUsuario("admin").orElseThrow().setEstadoUsuario(EstadoUsuario.BLOQUEADO);
-        mvc.perform(get("/api/v1/rule").session(sesion)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/rule").session(sesion)).andExpect(SesionesPrueba.alLogin());
         assertThat(sesion.isInvalid()).isTrue();
     }
 
@@ -91,7 +91,7 @@ class ProteccionApiMockMvcTest {
     void cambioDeClaveRevocaSesionAnterior() throws Exception {
         var sesion = admin();
         usuarios.cambiarClave(cuentas.findByNombreUsuario("admin").orElseThrow().getIdUsuario(), "ClaveNuevaSegura123");
-        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(SesionesPrueba.alLogin());
         assertThat(sesion.isInvalid()).isTrue();
     }
 
@@ -102,7 +102,7 @@ class ProteccionApiMockMvcTest {
         asignaciones.deleteAll(asignaciones.findByUsuario_IdUsuario(usuario.getIdUsuario()));
         cuentas.delete(usuario);
         cuentas.flush();
-        mvc.perform(get("/api/v1/rule").session(sesion)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/rule").session(sesion)).andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
@@ -113,9 +113,11 @@ class ProteccionApiMockMvcTest {
         asignaciones.flush();
         asignaciones.save(UsuarioRol.builder().usuario(usuario).rol(roles.findByCodigoRol("ANALISTA").orElseThrow())
                 .fechaAsignacion(OffsetDateTime.now()).build());
-        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/metric").session(sesion)).andExpect(status().isOk());
         assertThat(sesion.getAttribute("rol")).isEqualTo("ANALISTA");
+        // Una API sin permiso cierra la sesión: el login no devuelve a quien sigue autenticado a su inicio.
+        mvc.perform(get("/api/v1/user").session(sesion)).andExpect(SesionesPrueba.alLogin());
+        assertThat(sesion.isInvalid()).isTrue();
     }
 
     @Test
@@ -124,15 +126,15 @@ class ProteccionApiMockMvcTest {
         clientes.findByCodigoCliente("C-001").orElseThrow().setEsActivo(false);
         mvc.perform(post("/api/v1/evaluation").session(sesion).with(SesionesPrueba.csrf())
                         .contentType(MediaType.APPLICATION_JSON).content(OPERACION))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
     }
 
     @Test
     void rutasNuevasYMetodosNoDeclaradosSeDenieganInclusoAlAdmin() throws Exception {
-        mvc.perform(get("/api/v1/futura").session(admin())).andExpect(status().isForbidden());
-        mvc.perform(get("/api/v1/user_extra").session(admin())).andExpect(status().isForbidden());
-        mvc.perform(put("/api/v1/evaluation").session(admin()).with(SesionesPrueba.csrf())).andExpect(status().isForbidden());
-        mvc.perform(delete("/api/v1/evaluation/1").session(admin()).with(SesionesPrueba.csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/futura").session(admin())).andExpect(SesionesPrueba.alLogin());
+        mvc.perform(get("/api/v1/user_extra").session(admin())).andExpect(SesionesPrueba.alLogin());
+        mvc.perform(put("/api/v1/evaluation").session(admin()).with(SesionesPrueba.csrf())).andExpect(SesionesPrueba.alLogin());
+        mvc.perform(delete("/api/v1/evaluation/1").session(admin()).with(SesionesPrueba.csrf())).andExpect(SesionesPrueba.alLogin());
     }
 
     @Test

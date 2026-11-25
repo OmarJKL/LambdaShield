@@ -5,6 +5,8 @@ import com.lambdashield.fraude.application.service.AuthService;
 import com.lambdashield.fraude.support.SesionesPrueba;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -37,42 +39,23 @@ class ReporteApiMockMvcTest {
         return SesionesPrueba.crear(authService, "ANALISTA");
     }
 
-    @Test
-    void exportaCsvConEncabezado() throws Exception {
-        byte[] cuerpo = mockMvc.perform(get("/api/v1/report/export?formato=csv").session(analista()))
+    @ParameterizedTest
+    @CsvSource({
+            "csv, text/csv, reporte_transacciones_lambda.csv, ID",
+            "xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, reporte_transacciones_lambda.xlsx, PK",
+            "pdf, application/pdf, reporte_transacciones_lambda.pdf, %PDF"})
+    void exportaCadaFormatoConTipoNombreYFirma(String formato, String tipo, String archivo, String firma) throws Exception {
+        byte[] cuerpo = mockMvc.perform(get("/api/v1/report/export?formato=" + formato).session(analista()))
                 .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith("text/csv"))
-                .andExpect(header().string("Content-Disposition",
-                        org.hamcrest.Matchers.containsString("reporte_transacciones_lambda.csv")))
+                .andExpect(content().contentTypeCompatibleWith(tipo))
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString(archivo)))
                 .andReturn().getResponse().getContentAsByteArray();
 
-        String csv = new String(cuerpo, java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(csv).startsWith("ID,Fecha,Titular");
-        assertThat(csv.lines().count()).isGreaterThan(1);
-    }
-
-    @Test
-    void exportaExcelValido() throws Exception {
-        byte[] cuerpo = mockMvc.perform(get("/api/v1/report/export?formato=xlsx").session(analista()))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .andReturn().getResponse().getContentAsByteArray();
-
-        // Todo .xlsx es un ZIP: empieza con la firma PK.
-        assertThat(cuerpo.length).isGreaterThan(0);
-        assertThat(cuerpo[0]).isEqualTo((byte) 'P');
-        assertThat(cuerpo[1]).isEqualTo((byte) 'K');
-    }
-
-    @Test
-    void exportaPdfValido() throws Exception {
-        byte[] cuerpo = mockMvc.perform(get("/api/v1/report/export?formato=pdf").session(analista()))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith("application/pdf"))
-                .andReturn().getResponse().getContentAsByteArray();
-
-        assertThat(new String(cuerpo, 0, 4, java.nio.charset.StandardCharsets.US_ASCII)).isEqualTo("%PDF");
+        // CSV empieza con su encabezado (ID), XLSX es un ZIP (PK) y PDF declara su versión.
+        assertThat(new String(cuerpo, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith(firma);
+        if ("csv".equals(formato)) {
+            assertThat(new String(cuerpo, java.nio.charset.StandardCharsets.UTF_8).lines().count()).isGreaterThan(1);
+        }
     }
 
     @Test
@@ -94,7 +77,8 @@ class ReporteApiMockMvcTest {
                         .andReturn().getResponse().getContentAsByteArray(),
                 java.nio.charset.StandardCharsets.UTF_8);
 
-        assertThat(csv.lines().count()).isGreaterThan(1);
+        assertThat(csv.lines().skip(1).toList()).isNotEmpty()
+                .allMatch(linea -> linea.contains("María Fernández") && linea.contains("\"BAJO\""));
     }
 
     @Test
@@ -111,6 +95,6 @@ class ReporteApiMockMvcTest {
         MockHttpSession cliente = SesionesPrueba.crear(authService, "CLIENTE");
 
         mockMvc.perform(get("/api/v1/report/export?formato=csv").session(cliente))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
     }
 }

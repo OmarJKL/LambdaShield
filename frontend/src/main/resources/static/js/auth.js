@@ -24,9 +24,9 @@
     }
 
     /**
-     * Envoltorio de fetch que centraliza el manejo de sesión:
-     *  - 401 → redirige a /login
-     *  - 403 → muestra un aviso al usuario y lanza el error
+     * Envoltorio de fetch que centraliza el manejo de sesión. Sin sesión o sin permiso el servidor
+     * responde con una redirección al login: no se sigue dentro de fetch, la página entera vuelve
+     * al login sin mostrar avisos. 401/403 se tratan igual por compatibilidad.
      */
     async function fetchApi(url, opciones = {}) {
         const metodo = (opciones.method || 'GET').toUpperCase();
@@ -39,17 +39,11 @@
             if (!token || !cabecera) throw new Error('Recarga la página para renovar la protección de sesión.');
             headers.set(cabecera, token);
         }
-        const res = await fetch(destino.href, { ...opciones, headers, credentials: 'same-origin' });
+        const res = await fetch(destino.href, { ...opciones, headers, credentials: 'same-origin', redirect: 'manual' });
 
-        if (res.status === 401) {
+        if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
             window.location.replace('/login');
-            throw Object.assign(new Error('Sesión expirada'), { gestionado: true });
-        }
-
-        if (res.status === 403) {
-            const mensaje = await mensajeError(res, 'No tienes permisos para realizar esta acción.');
-            mostrarAviso(mensaje);
-            throw Object.assign(new Error(mensaje), { gestionado: true });
+            throw Object.assign(new Error('Sesión no válida'), { gestionado: true });
         }
 
         return res;

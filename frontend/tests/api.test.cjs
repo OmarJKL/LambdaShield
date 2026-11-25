@@ -69,13 +69,15 @@ test('401 redirige al login y marca el error como gestionado', async () => {
     await assert.rejects(h.context.LSApi.json('/api'), error => error.gestionado === true);
     assert.deepEqual(h.redirects, ['/login']);
 });
-test('403 muestra una sola notificación aunque el consumidor reporte el error', async () => {
-    const h = harness(response(403, { error: 'No autorizado' }));
-    try { await h.context.LSApi.json('/api'); }
-    catch (error) { h.context.LSApi.reportarError(error); }
-    assert.equal(h.body.children.length, 1);
-    assert.equal(h.body.children[0].children.length, 1);
-    assert.equal(h.body.children[0].children[0].textContent, 'No autorizado');
+test('una redirección del servidor o un 403 vuelven al login sin mostrar avisos', async () => {
+    for (const res of [{ type: 'opaqueredirect', status: 0, ok: false }, response(403, { error: 'No autorizado' })]) {
+        const h = harness(res);
+        try { await h.context.LSApi.json('/api'); assert.fail('debía rechazar'); }
+        catch (error) { assert.equal(error.gestionado, true); h.context.LSApi.reportarError(error); }
+        assert.deepEqual(h.redirects, ['/login']);
+        assert.equal(h.body.children.length, 0);
+        assert.equal(h.calls[0].options.redirect, 'manual');
+    }
 });
 test('las utilidades escapan HTML y mantienen céntimos y saldo cero', () => {
     const { context } = harness();

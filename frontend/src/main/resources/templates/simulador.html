@@ -1,24 +1,68 @@
 <!DOCTYPE html>
 <html lang="es" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/head :: head('Simulador')}"></head>
+<head th:replace="~{fragments/head :: head('Campo para desarrolladores')}"></head>
 <body>
     <!-- Barra de Navegación -->
     <nav th:replace="~{fragments/navbar :: navbar('simulador')}"></nav>
 
     <!-- Contenedor Principal -->
     <div class="container pb-5">
-        <div class="d-flex align-items-center justify-content-between mb-4">
+        <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
             <div>
-                <h3 class="fw-bold mb-0">Simulador de Transacciones</h3>
-                <p class="text-secondary small mb-0">Evaluación en tiempo real con los 8 factores de riesgo.</p>
+                <h3 class="fw-bold mb-0">Campo para desarrolladores</h3>
+                <p class="text-secondary small mb-0">Prueba escenarios sin guardar, compara reglas candidatas con el catálogo vigente o registra operaciones de prueba.</p>
             </div>
             <div class="d-flex gap-2">
                 <button class="btn btn-secundario" id="btnAuto">
-                    <i class="bi bi-lightning-charge-fill"></i> Iniciar tráfico automático
+                    <i class="bi bi-lightning-charge-fill"></i> Probar lote de 50 escenarios
                 </button>
             </div>
         </div>
 
+        <div class="tarjeta-ls p-3 mb-4">
+            <fieldset>
+                <legend class="fs-6 fw-bold mb-2">Modo de prueba</legend>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="modoSimulador" id="modoProbar" value="probar" checked>
+                    <label class="form-check-label" for="modoProbar">Probar sin guardar</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="modoSimulador" id="modoRegistrar" value="registrar">
+                    <label class="form-check-label" for="modoRegistrar">Registrar en la base de datos</label>
+                </div>
+                <p class="small text-secondary mb-0 mt-1">Probar no crea transacciones, evaluaciones ni contactos y no mueve saldo.
+                    Registrar crea la operación y descuenta saldo si se aprueba: usa cuentas de demostración.</p>
+            </fieldset>
+            <div id="panelCandidatas" class="mt-3 pt-3 border-top">
+                <h4 class="fs-6 fw-bold mb-1">Reglas candidatas</h4>
+                <p class="small text-secondary mb-2">Se evalúan como si estuvieran activas y el resultado se compara con el catálogo vigente.
+                    Los porcentajes de todas las reglas se reparten de nuevo, igual que al activarlas.</p>
+                <div class="d-flex flex-wrap gap-3" th:if="${!#lists.isEmpty(reglasCandidatas)}">
+                    <div class="form-check" th:each="regla : ${reglasCandidatas}">
+                        <input class="form-check-input candidata-regla" type="checkbox" th:id="'candidata-' + ${regla.codigo()}" th:value="${regla.codigo()}">
+                        <label class="form-check-label small" th:for="'candidata-' + ${regla.codigo()}"
+                               th:text="${regla.codigo()} + ' · ' + ${regla.nombre()} + ' (peso ' + ${regla.pesoMaximo()} + ')'">RC001 · Regla (peso 25)</label>
+                    </div>
+                </div>
+                <p class="small text-secondary mb-0" th:if="${#lists.isEmpty(reglasCandidatas)}">No hay reglas inactivas. Crea una en Motor de Reglas o desactiva una para comparar.</p>
+                <div id="borradorSimulador" class="alert alert-info small d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 mb-0" hidden>
+                    <span><strong>Borrador del formulario:</strong> <span id="borradorNombre"></span></span>
+                    <button type="button" id="quitarBorrador" class="btn btn-secundario btn-sm">Quitar borrador</button>
+                </div>
+                <p class="small text-secondary mt-2 mb-0">Reglas activas: <span th:each="regla, it : ${reglasActivas}"
+                    th:text="${regla.codigo()} + ' ' + ${regla.participacion()} + '%' + (${it.last} ? '' : ' · ')">RF001 14.3%</span></p>
+            </div>
+        </div>
+        <div class="tarjeta-ls p-3 mb-4">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5"><label for="escenarioSimulador" class="form-label small">Escenario de prueba</label>
+                    <select id="escenarioSimulador" class="form-select"><option value="habitual">Operación habitual</option><option value="dispositivo">Dispositivo e IP nuevos</option><option value="riesgo">Varias señales de riesgo</option></select></div>
+                <div class="col-md-3"><button type="button" id="btnAplicarEscenario" class="btn btn-secundario w-100">Cargar escenario</button></div>
+                <div class="col-md-4"><p id="estadoTrafico" class="small text-secondary mb-0" role="status" aria-live="polite">En modo prueba, el lote evalúa 50 escenarios aleatorios sin guardar. En modo registro, envía hasta 10 operaciones, una cada 6 segundos, para el titular seleccionado.</p></div>
+            </div>
+            <div id="resumenLote" class="mt-3" aria-live="polite" hidden>
+            </div>
+        </div>
         <div class="row g-4">
             <!-- Columna Izquierda: Formulario -->
             <div class="col-xl-5">
@@ -31,8 +75,8 @@
                     <form id="formTransaccion" class="p-4" novalidate>
                         <div class="row g-3">
                             <div class="col-12">
-                                <label class="form-label">Titular de la cuenta</label>
-                                <select class="form-select" id="trCliente">
+                                <label class="form-label" for="trCliente">Titular de la cuenta</label>
+                                <select class="form-select" id="trCliente" required>
                                     <option th:each="c : ${clientes}"
                                             th:value="${c.codigo()}"
                                             th:data-promedio="${c.promedioGasto()}"
@@ -41,11 +85,11 @@
                             </div>
 
                             <div class="col-6">
-                                <label class="form-label">Monto (S/)</label>
-                                <input type="number" class="form-control" id="trMonto" value="150" min="1" step="0.01" required>
+                                <label class="form-label" for="trMonto">Monto (S/)</label>
+                                <input type="number" class="form-control" id="trMonto" value="150" min="0.01" step="0.01" required>
                             </div>
                             <div class="col-6">
-                                <label class="form-label">Comercio</label>
+                                <label class="form-label" for="trCategoria">Categoría</label>
                                 <select class="form-select" id="trCategoria">
                                     <option value="retail">Retail / Supermercado</option>
                                     <option value="restaurante">Restaurante</option>
@@ -57,11 +101,11 @@
                             </div>
 
                             <div class="col-6">
-                                <label class="form-label">Hora (0-23)</label>
-                                <input type="time" class="form-control" id="trHora" value="14:30">
+                                <label class="form-label" for="trHora">Hora del escenario</label>
+                                <input type="time" class="form-control" id="trHora" value="14:00" required>
                             </div>
                             <div class="col-6">
-                                <label class="form-label">Ubicación</label>
+                                <label class="form-label" for="trPais">País declarado</label>
                                 <select class="form-select" id="trPais">
                                     <option value="local">Perú (Habitual)</option>
                                     <option value="regional">Región (Chile, Colombia...)</option>
@@ -70,35 +114,36 @@
                             </div>
 
                             <div class="col-6">
-                                <label class="form-label">Dispositivo</label>
+                                <label class="form-label" for="trDispositivo">Dispositivo</label>
                                 <select class="form-select" id="trDispositivo">
                                     <option value="reconocido">Habitual</option>
                                     <option value="nuevo">Nuevo (Sin historial)</option>
                                 </select>
                             </div>
                             <div class="col-6">
-                                <label class="form-label">Operaciones (Última hora)</label>
-                                <input type="number" class="form-control" id="trVelocidad" value="1" min="1" max="20">
+                                <label class="form-label" for="trVelocidad">Operaciones (Última hora)</label>
+                                <input type="number" class="form-control" id="trVelocidad" value="0" min="0" max="1000" required>
                             </div>
 
                             <div class="col-6">
-                                <label class="form-label">Beneficiario</label>
+                                <label class="form-label" for="trBeneficiario">Beneficiario</label>
                                 <select class="form-select" id="trBeneficiario">
-                                    <option value="recurrente">Recurrente / Validado</option>
+                                    <option value="recurrente">Contacto recurrente</option>
                                     <option value="nuevo">Nuevo / Desconocido</option>
                                 </select>
                             </div>
                             <div class="col-6">
-                                <label class="form-label">Dirección IP</label>
+                                <label class="form-label" for="trIp">Historial de IP</label>
                                 <select class="form-select" id="trIp">
                                     <option value="conocida">IP Habitual</option>
-                                    <option value="nueva">IP Nueva / Sospechosa</option>
+                                    <option value="nueva">IP nueva</option>
                                 </select>
                             </div>
                         </div>
 
-                        <button type="submit" class="btn btn-principal w-100 mt-4">
-                            <i class="bi bi-cpu"></i> Ejecutar Motor Antifraude
+                        <p class="form-text mt-3 mb-0">En este campo de pruebas defines hora, frecuencia, país, dispositivo e IP. En el portal del cliente, hora, frecuencia, dispositivo e IP se obtienen en el servidor.</p>
+                        <button type="submit" id="btnEvaluar" class="btn btn-principal w-100 mt-4">
+                            <i class="bi bi-eye"></i> Probar sin guardar
                         </button>
                     </form>
                 </div>
@@ -138,6 +183,8 @@
 
                         <hr style="border-color: var(--borde);">
 
+                        <p id="comparacionSimulador" class="alert alert-secondary small" role="status" hidden></p>
+                        <p id="resumenFactores" class="small text-secondary"></p>
                         <div class="row g-3" id="listaFactores"></div>
                     </div>
                 </div>

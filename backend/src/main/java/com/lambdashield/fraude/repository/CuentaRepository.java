@@ -12,6 +12,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface CuentaRepository extends JpaRepository<Cuenta, Long> {
     Optional<Cuenta> findByNumeroCuenta(String numeroCuenta);
+
+    /** Compara sin espacios ni guiones: 0011-0145-… y 00110145… identifican la misma cuenta. */
+    @Query("select c from Cuenta c where replace(replace(c.numeroCuenta, '-', ''), ' ', '') = :digitos")
+    Optional<Cuenta> buscarPorNumeroNormalizado(@Param("digitos") String digitos);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Cuenta> findFirstByCliente_IdClienteAndEstadoCuentaOrderByIdCuentaAsc(Long idCliente, EstadoCuenta estado);
+
+    Optional<Cuenta> findTopByCliente_IdClienteAndEstadoCuentaOrderByIdCuentaAsc(Long idCliente, EstadoCuenta estado);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from Cuenta c where c.idCuenta = :id")
     Optional<Cuenta> bloquearPorId(@Param("id") Long id);

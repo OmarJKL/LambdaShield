@@ -58,15 +58,20 @@ ADMIN dispone de desactivación y reactivación mediante confirmación. ANALISTA
 
 ### 4.4 Catálogo de reglas — `/reglas`
 
-Muestra reglas activas leídas de la base: código, nombre, descripción y peso máximo configurado. No ofrece edición de reglas ni hay un CRUD REST de catálogo. Cambiar pesos en BD requiere un procedimiento administrativo externo a esta interfaz.
+Muestra reglas activas e inactivas en una tabla con código, nombre, descripción, peso relativo, participación porcentual y estado. Las reglas creadas desde el formulario llevan la etiqueta «Definida». Permite buscar sin distinguir tildes y filtrar por estado, con páginas de 10, 25 o 50 filas. ADMIN puede activar o desactivar; antes de cualquiera de los dos cambios se muestra un modal con la participación de cada regla antes y después. ANALISTA consulta. El formulario de creación de borradores está en un panel desplegable debajo del catálogo. Cambiar pesos o condiciones de las reglas vigentes requiere un procedimiento administrativo externo a esta interfaz.
 
-### 4.5 Simulador — `/simulador`
+### 4.5 Campo para desarrolladores — `/simulador`
 
-Solo ADMIN. Thymeleaf entrega el selector de clientes y sus promedios. El administrador declara las señales de riesgo y envía la operación al mismo caso de uso persistente.
+Solo ADMIN. Thymeleaf entrega el selector de clientes, sus promedios, las reglas activas con su participación y las reglas inactivas que se pueden probar. El administrador declara las señales de riesgo y elige un modo:
 
-El resultado incluye puntaje, estado, desglose y gráfico de factores. El tráfico automático genera escenarios periódicos. El generador actual usa los códigos demo C-001, C-002 y C-003; no debe asumirse compatible con cualquier base sin esos fixtures.
+- **Probar sin guardar** (predeterminado): no crea transacciones, evaluaciones, contactos, dispositivos ni categorías y no mueve saldo. Permite marcar reglas candidatas (inactivas) y un borrador traído desde `/reglas`; el resultado compara el puntaje y nivel del catálogo vigente con los del catálogo con candidatas, e indica qué pasaría con el saldo si se registrara. El lote evalúa 50 escenarios aleatorios de todos los titulares en una sola solicitud y resume cuántos cambian de nivel.
+- **Registrar en la base de datos**: envía la operación al mismo caso de uso persistente que antes.
 
-**Tiene efectos reales en la base local:** crea evaluaciones, modifica saldos cuando corresponde y consume límites API. No es un modo de cálculo sin persistencia.
+El resultado incluye puntaje, estado, saldo y desglose de las reglas aplicadas. El radar se muestra para entre 3 y 12 factores; los demás casos conservan el detalle. Se pueden preparar escenarios habituales, de dispositivo/IP nuevos y de múltiples señales sin enviarlos. El tráfico automático usa el titular seleccionado entre los clientes cargados, registra hasta diez operaciones y espera seis segundos después de cada respuesta antes de continuar. Evita solicitudes simultáneas y se detiene al fallar o salir de la página. Cada evaluación se guarda y puede descontar saldo si se aprueba; se recomienda usar cuentas de demostración. El enlace aparece después de Usuarios y solo está disponible para ADMIN.
+
+La hora del escenario define la fecha de la transacción: si es posterior a la hora actual, se registra el día anterior, nunca en el futuro.
+
+**El modo registro tiene efectos reales en la base local:** crea evaluaciones, modifica saldos cuando corresponde y consume límites API. No es un modo de cálculo sin persistencia.
 
 ### 4.6 Reportes — `/reportes`
 
@@ -80,11 +85,11 @@ Solo ADMIN. La interfaz consume la API para listar, crear, editar, cambiar clave
 
 - Usuario y correo deben ser únicos según las comprobaciones del servicio y las restricciones del esquema.
 - El nombre de usuario se normaliza al crear; el contrato de edición no lo cambia.
-- Un usuario nuevo se crea ACTIVO.
+- Un usuario nuevo se crea ACTIVO; el formulario de alta no muestra el selector de estado.
 - CLIENTE requiere un código de cliente existente; crear el usuario no crea la entidad bancaria.
 - Cambiar rol o estado no debe dejar al sistema sin otro administrador activo.
 - No se puede eliminar al usuario que realiza la acción.
-- La eliminación es física e incluye sus asignaciones de rol; otras referencias de BD pueden impedirla.
+- La eliminación es física e incluye sus asignaciones de rol. Si el usuario tiene auditoría, alertas o casos asociados, se responde 409 y no se elimina; en ese caso se puede bloquear.
 - Cambiar clave, bloquear o eliminar hace que las sesiones anteriores pierdan acceso en la siguiente petición admitida.
 
 La protección de la cuenta propia se refiere a la eliminación. No significa que todas las modificaciones del propio perfil estén prohibidas.
@@ -109,11 +114,11 @@ La validación del DTO ocurre antes de sustituir las señales. Por ello el clien
 
 ### 5.2 Coordinación transaccional
 
-1. Buscar el cliente y la primera cuenta por ID; exigir que esa cuenta esté activa.
-2. Bloquear la cuenta para escribir.
+1. Buscar el cliente y su primera cuenta ACTIVA, bloqueándola para escribir. Sin cuenta activa se responde 400.
+2. Para CLIENTE, exigir que la categoría exista en el catálogo y esté activa; el portal no crea categorías nuevas.
 3. Resolver/crear referencias de tipo, canal, dispositivo y beneficiario.
 4. Ejecutar reglas y aplicar el catálogo vigente.
-5. Sumar factores con tope 100 y determinar nivel, decisión y estado.
+5. Repartir el 100 % del puntaje entre las reglas activas según su peso, sumar (con tope de seguridad 100 por redondeo) y determinar nivel, decisión y estado.
 6. Aplicar el movimiento solo si el estado es APROBADA.
 7. Guardar transacción, evaluación y factores en la misma transacción.
 8. Responder con el resultado y el saldo actual de la cuenta.
@@ -171,20 +176,34 @@ Para saldo, la base estimada es `saldoActual - ingresos + egresos`. No se usa un
 
 ## 9. Capacidades que no están implementadas
 
-No hay acreditación externa, reserva de fondos retenidos, aprobación manual posterior de una retención, administración de reglas desde la interfaz, investigación de casos, auditoría completa de acciones, notificaciones externas, MFA ni recuperación de contraseña.
+No hay acreditación externa, reserva de fondos retenidos, aprobación manual posterior de una retención, edición de pesos o condiciones de reglas desde la interfaz (sí su activación, ver §4.4), investigación de casos, auditoría completa de acciones, notificaciones externas, MFA ni recuperación de contraseña.
 
 Las tablas previstas para esas áreas no significan que exista su flujo de negocio. Estas distinciones se amplían en [valor de negocio](05_VALOR_NEGOCIO.md).
 
 ### Consulta del titular por número de cuenta
 
-El portal pide banco y cuenta antes del titular. Al escribir o pegar una cuenta Lambda Shield, espera 350 ms y consulta el titular; también consulta al salir del campo y antes de enviar. El nombre interno es de solo lectura. Cambiar cuenta o banco limpia el nombre anterior, y una respuesta de una consulta anterior no puede sobrescribir el destinatario actual. Una cuenta inexistente, inactiva o propia no se admite. Elegir un contacto utiliza el mismo flujo.
+El portal pide banco y cuenta antes del titular. Los espacios y guiones del número son solo presentación: `0011-0145-0200847292` y `001101450200847292` identifican la misma cuenta y el mismo contacto, que se guarda con el formato de la cuenta interna. Al escribir o pegar una cuenta Lambda Shield, espera 350 ms y consulta el titular; también consulta al salir del campo y antes de enviar. El nombre interno es de solo lectura. Cambiar cuenta o banco limpia el nombre anterior, y una respuesta de una consulta anterior no puede sobrescribir el destinatario actual. Una cuenta inexistente, inactiva o propia no se admite. Elegir un contacto utiliza el mismo flujo.
 
 Para otros bancos solo se completan los datos de contactos guardados; si el destinatario es nuevo, el nombre se escribe manualmente y la pantalla informa que no verifica la titularidad externa. La aplicación no dispone de una conexión con sus directorios bancarios.
 
 ## Asistente IA para definiciones
 
-En `/reglas`, ADMIN puede completar condiciones tipadas y obtener interpretación, advertencias, sugerencias y casos propuestos de OpenRouter. El borrador se puede descargar, pero no se publica ni se conserva en BD. Las ocho reglas vigentes continúan evaluando las operaciones. [Configuración y límites](12_ASISTENTE_REGLAS_IA.md).
+En `/reglas`, ADMIN completa condiciones tipadas y puede pedir a OpenRouter interpretación, advertencias, sugerencias y casos propuestos. Con el mismo formulario puede:
+
+- **Probar sin guardar**: lleva el borrador al campo de desarrolladores (en la misma pestaña) y lo compara con el catálogo vigente.
+- **Guardar como regla (inactiva)**: crea una regla RC001, RC002… con la definición del administrador, nunca con la sugerencia de la IA. No necesita que OpenRouter esté configurado. Queda inactiva hasta que se active desde el catálogo.
+
+Una regla RC es binaria: si se cumplen sus condiciones (todas o alguna, según la combinación) aporta su máximo; si no, 0. No se pueden editar sus condiciones después de guardarla; para cambiarla se crea otra y se desactiva la anterior. [Configuración y límites](12_ASISTENTE_REGLAS_IA.md).
 
 ### Activación de reglas
 
 En `/reglas` se muestran tanto reglas activas como inactivas. ADMIN puede activar o desactivar cada regla; ANALISTA solo consulta. El estado se conserva en BD y determina qué reglas aportan puntos y factores en las siguientes evaluaciones. Las evaluaciones anteriores conservan sus resultados. No requiere migración: se utiliza `regla_fraude.es_activa`.
+
+Controles del cambio de estado:
+
+- Antes de activar o desactivar se confirma en un modal que muestra cómo se reparte el porcentaje entre las reglas.
+- No se puede desactivar la última regla activa: un motor sin reglas aprobaría todo con puntaje 0.
+- Solo se activa una regla implementada y con peso entero 0–100; de lo contrario cada evaluación nueva fallaría.
+- Una regla con peso inválido sigue visible en el catálogo como «Peso inválido» para poder corregirla.
+- Cada cambio efectivo se registra en `auditoria` (usuario, IP, acción, estado anterior y nuevo). Repetir el mismo estado no genera registro.
+- Dos cambios simultáneos se serializan mediante un bloqueo del catálogo.

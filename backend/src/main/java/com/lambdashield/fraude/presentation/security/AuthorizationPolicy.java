@@ -32,7 +32,8 @@ public class AuthorizationPolicy {
             case "GET", "HEAD" -> lector && LECTURAS.contains(ruta)
                     || admin && (ruta.equals("/api/v1/user") || ruta.matches("/api/v1/user/-?[0-9]+"));
             case "POST" -> ruta.equals("/api/v1/evaluation") && (admin || "CLIENTE".equals(rol))
-                    || admin && ruta.equals("/api/v1/user");
+                    || admin && (ruta.equals("/api/v1/user") || ruta.equals("/api/v1/rule")
+                    || ruta.equals("/api/v1/rule/simulation"));
             case "PATCH" -> admin && (ruta.matches("/api/v1/evaluation/-?[0-9]+(?:/activar)?")
                     || usuario && !ruta.equals("/api/v1/user")
                     || ruta.matches("/api/v1/rule/[A-Za-z0-9_-]+/estado"));

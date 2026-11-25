@@ -33,24 +33,14 @@ class DeteccionFraudeServiceTest {
     }
 
     @Test
-    void aplicaTopeDeCienAlPuntajeTotal() {
-        List<FactorEvaluado> factores = List.of(
-                new FactorEvaluado("monto", "RF001", 60, 100, "prueba"),
-                new FactorEvaluado("viaje", "RF007", 60, 100, "prueba")
-        );
-
-        assertThat(service.calcularPuntajeTotal(factores)).isEqualTo(100);
-    }
-
-    @Test
-    void sumaElPuntajeDeLosFactoresSinSuperarCien() {
-        List<FactorEvaluado> factores = List.of(
-                new FactorEvaluado("monto", "RF001", 25, 25, "prueba"),
-                new FactorEvaluado("horario", "RF005", 10, 10, "prueba")
-        );
-
-        assertThat(service.calcularPuntajeTotal(factores)).isEqualTo(35);
+    void sumaLosFactoresConTopeDeCien() {
         assertThat(service.calcularPuntajeTotal(List.of())).isZero();
+        assertThat(service.calcularPuntajeTotal(List.of(
+                new FactorEvaluado("monto", "RF001", 25, 25, "prueba"),
+                new FactorEvaluado("horario", "RF005", 10, 10, "prueba")))).isEqualTo(35);
+        assertThat(service.calcularPuntajeTotal(List.of(
+                new FactorEvaluado("monto", "RF001", 60, 100, "prueba"),
+                new FactorEvaluado("viaje", "RF007", 60, 100, "prueba")))).isEqualTo(100);
     }
 
     @Test

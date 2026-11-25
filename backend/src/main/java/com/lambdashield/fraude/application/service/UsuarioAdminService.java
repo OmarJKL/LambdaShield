@@ -3,6 +3,7 @@ package com.lambdashield.fraude.application.service;
 import com.lambdashield.fraude.application.command.UsuarioActualizarCommand;
 import com.lambdashield.fraude.application.command.UsuarioCrearCommand;
 import com.lambdashield.fraude.application.model.UsuarioResumen;
+import com.lambdashield.fraude.application.validation.PoliticaClave;
 import com.lambdashield.fraude.domain.entity.Cliente;
 import com.lambdashield.fraude.domain.entity.Rol;
 import com.lambdashield.fraude.domain.entity.UsuarioRol;
@@ -73,6 +74,8 @@ public class UsuarioAdminService {
 
     @Transactional
     public UsuarioResumen crear(UsuarioCrearCommand command) {
+        PoliticaClave.validar(command.clave());
+        bloquearAdministracion();
         String usuario = normalizar(command.usuario());
         validarUnicidad(usuario, command.correo(), null);
 
@@ -92,6 +95,7 @@ public class UsuarioAdminService {
 
     @Transactional
     public UsuarioResumen actualizar(Long idUsuario, UsuarioActualizarCommand command) {
+        bloquearAdministracion();
         UsuarioSistema usuario = obtener(idUsuario);
         validarUnicidad(null, command.correo(), idUsuario);
 
@@ -119,6 +123,7 @@ public class UsuarioAdminService {
 
     @Transactional
     public void cambiarClave(Long idUsuario, String clave) {
+        PoliticaClave.validar(clave);
         UsuarioSistema usuario = obtener(idUsuario);
         usuario.setHashPassword(passwordEncoder.encode(clave));
         usuarioRepository.save(usuario);
@@ -126,6 +131,7 @@ public class UsuarioAdminService {
 
     @Transactional
     public void eliminar(Long idUsuario, String usuarioActual) {
+        bloquearAdministracion();
         UsuarioSistema usuario = obtener(idUsuario);
         if (usuario.getNombreUsuario().equals(usuarioActual)) {
             throw new IllegalArgumentException("No puedes eliminar tu propio usuario");
@@ -137,6 +143,14 @@ public class UsuarioAdminService {
 
         usuarioRolRepository.deleteAll(usuarioRolRepository.findByUsuario_IdUsuario(idUsuario));
         usuarioRepository.delete(usuario);
+        // Las referencias de auditoría, alertas o casos se detectan aquí y no al confirmar.
+        usuarioRepository.flush();
+    }
+
+    private void bloquearAdministracion() {
+        // Adquirir antes de leer/modificar usuarios evita comprobaciones obsoletas y bloqueos cruzados.
+        rolRepository.bloquearAdministracion()
+                .orElseThrow(() -> new IllegalStateException("Falta configurar el rol ADMIN"));
     }
 
     private UsuarioSistema obtener(Long idUsuario) {

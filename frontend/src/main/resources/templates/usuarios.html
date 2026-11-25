@@ -67,8 +67,8 @@
                         </div>
                         <div class="mb-3" id="grupoClave">
                             <label class="form-label">Clave inicial</label>
-                            <input type="password" class="form-control" id="usuarioClave" minlength="8" required>
-                            <small class="text-secondary">Entre 8 y 72 caracteres. Se almacena cifrada con BCrypt.</small>
+                            <input type="password" class="form-control" id="usuarioClave" minlength="8" maxlength="72" required>
+                            <small class="text-secondary">Mínimo 8 caracteres y máximo 72 bytes UTF-8; tildes y emojis ocupan más de un byte. Se guarda un hash BCrypt.</small>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Rol</label>
@@ -78,7 +78,7 @@
                                 <option value="ADMIN">ADMIN</option>
                             </select>
                         </div>
-                        <div class="mb-3">
+                        <div class="mb-3 d-none" id="grupoEstado">
                             <label class="form-label">Estado</label>
                             <select class="form-select" id="usuarioEstado">
                                 <option value="ACTIVO">ACTIVO</option>
@@ -113,8 +113,8 @@
                         <p class="text-secondary small" id="claveModalUsuario">-</p>
                         <div class="mb-3">
                             <label class="form-label">Nueva clave</label>
-                            <input type="password" class="form-control" id="claveNueva" minlength="8" required>
-                            <small class="text-secondary">Entre 8 y 72 caracteres. Se almacena cifrada con BCrypt.</small>
+                            <input type="password" class="form-control" id="claveNueva" minlength="8" maxlength="72" required>
+                            <small class="text-secondary">Mínimo 8 caracteres y máximo 72 bytes UTF-8; tildes y emojis ocupan más de un byte. Se guarda un hash BCrypt.</small>
                         </div>
                     </div>
                     <div class="modal-footer border-0">

@@ -8,21 +8,74 @@
     <!-- Contenedor Principal -->
     <div class="container pb-5">
         <div class="mb-4">
-            <h3 class="fw-bold mb-0">Parámetros del Motor Antifraude </h3>
-            <p class="text-secondary small mb-0">Arquitectura de reglas iniciales parametrizadas según especificación técnica. El score final se normaliza en el rango de 0 a 100.</p>
+            <h3 class="fw-bold mb-0">Motor de reglas</h3>
+            <p class="text-secondary small mb-0">Administra el catálogo de detección. El puntaje final se limita al rango de 0 a 100.</p>
         </div>
 
-        <section class="tarjeta-ls p-4 mb-4 border-top border-danger border-3" th:if="${session.rol == 'ADMIN'}" id="asistenteReglas">
+        <div class="alert alert-success d-flex flex-wrap justify-content-between align-items-center gap-2" role="status" th:if="${reglaCreada != null}">
+            <span><strong th:text="${reglaCreada.codigo()}">RC001</strong> se guardó inactiva:
+                <span th:text="${reglaCreada.nombre()}">Regla</span>. Pruébala antes de activarla.</span>
+            <a class="btn btn-secundario btn-sm" th:href="@{/simulador(candidata=${reglaCreada.codigo()})}">Probar en el campo de desarrolladores</a>
+        </div>
+
+        <section class="tarjeta-ls mb-4" aria-labelledby="tituloCatalogoReglas">
+            <div class="p-4 border-bottom">
+                <div class="d-flex flex-wrap justify-content-between gap-3 align-items-center mb-3">
+                    <div><h4 id="tituloCatalogoReglas" class="fw-bold mb-1">Catálogo de reglas</h4>
+                        <p class="text-secondary small mb-0">Consulta las condiciones y administra qué reglas aportan al puntaje.</p></div>
+                    <span class="badge bg-secondary" id="resumenCatalogoReglas" th:text="${#lists.size(reglas)} + ' reglas'">Reglas</span>
+                </div>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-7"><label for="buscarReglas" class="form-label small">Buscar regla</label>
+                        <input id="buscarReglas" type="search" class="form-control" placeholder="Código, nombre o descripción" autocomplete="off"></div>
+                    <div class="col-md-3"><label for="filtrarEstadoReglas" class="form-label small">Estado</label>
+                        <select id="filtrarEstadoReglas" class="form-select"><option value="todas">Todas</option><option value="true">Activas</option><option value="false">Inactivas</option></select></div>
+                    <div class="col-md-2"><label for="tamanoPaginaReglas" class="form-label small">Por página</label>
+                        <select id="tamanoPaginaReglas" class="form-select"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select></div>
+                </div>
+            </div>
+            <div class="table-responsive tabla-reglas-contenedor">
+                <table id="tablaReglas" class="table table-hover align-middle mb-0 tabla-reglas">
+                    <caption class="visually-hidden">Reglas del motor antifraude, su puntaje máximo y estado actual.</caption>
+                    <thead><tr><th scope="col">Código</th><th scope="col">Regla y descripción</th><th scope="col" class="text-end">Peso</th><th scope="col" class="text-end">Participación</th><th scope="col">Estado</th><th scope="col" class="text-end" th:if="${session.rol == 'ADMIN'}">Acción</th></tr></thead>
+                    <tbody>
+                        <tr th:each="regla : ${reglas}" data-fila-regla th:attr="data-activa=${regla.activa()},data-codigo=${regla.codigo()},data-nombre=${regla.nombre()},data-peso=${regla.pesoMaximo()}">
+                            <td class="dato-mono text-nowrap fw-bold" th:text="${regla.codigo()}">RF001</td>
+                            <td class="regla-descripcion"><strong class="d-block mb-1"><span th:text="${regla.nombre()}">Monto inusual</span> <span class="badge bg-info text-dark" th:if="${regla.personalizada()}">Definida</span></strong><span class="text-secondary small" th:text="${regla.descripcion()}">Condición de disparo.</span></td>
+                            <td class="text-end dato-mono text-nowrap" th:text="${regla.pesoMaximo() != null} ? ${regla.pesoMaximo()} : 'Peso inválido'">25</td>
+                            <td class="text-end dato-mono text-nowrap" data-participacion-regla th:text="${regla.participacion() != null} ? ${regla.participacion()} + ' %' : '—'">14.3 %</td>
+                            <td><span data-estado-regla class="badge" th:classappend="${regla.activa()} ? 'bg-success' : 'bg-secondary'" th:text="${regla.activa()} ? 'Activa' : 'Inactiva'">Activa</span></td>
+                            <td class="text-end" th:if="${session.rol == 'ADMIN'}">
+                                <button type="button" class="btn btn-secundario btn-sm text-nowrap" data-cambiar-regla
+                                    th:attr="data-codigo=${regla.codigo()},data-activa=${regla.activa()},aria-label=(${regla.activa()} ? 'Desactivar ' : 'Activar ') + ${regla.nombre()}"
+                                    th:text="${regla.activa()} ? 'Desactivar' : 'Activar'">Desactivar</button>
+                            </td>
+                        </tr>
+                        <tr id="reglasSinResultados" hidden><td colspan="6" class="text-center text-secondary py-5">No hay reglas que coincidan con la búsqueda.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="p-3 d-flex flex-wrap justify-content-between align-items-center gap-3 border-top">
+                <span id="paginaReglasInfo" class="small text-secondary" role="status" aria-live="polite"></span>
+                <nav aria-label="Páginas del catálogo" class="d-flex gap-2"><button id="reglasAnterior" type="button" class="btn btn-secundario btn-sm">Anterior</button><button id="reglasSiguiente" type="button" class="btn btn-secundario btn-sm">Siguiente</button></nav>
+            </div>
+        </section>
+        <p class="small text-secondary">El peso es relativo: las reglas activas se reparten el 100 % del puntaje en proporción a su peso.
+            Al activar, desactivar o agregar una regla, la participación de las demás se reajusta. Los cambios se aplican a nuevas evaluaciones y conservan el historial anterior.</p>
+        <p id="estadoReglasMensaje" class="small" role="status" aria-live="polite"></p>
+
+        <details class="tarjeta-ls mb-4" th:if="${session.rol == 'ADMIN'}" id="asistenteReglas">
+            <summary class="p-3 fw-bold">Preparar una nueva regla</summary>
+            <div class="p-4 border-top">
             <div class="d-flex flex-wrap justify-content-between gap-2 align-items-start mb-3">
                 <div>
-                    <h4 class="fw-bold mb-1"><i class="bi bi-stars text-danger"></i> Asistente de reglas con IA</h4>
+                    <h4 class="fw-bold mb-1">Creación de reglas</h4>
                     <p class="text-secondary small mb-0">Define las condiciones y solicita una revisión al modelo configurado en OpenRouter.</p>
                 </div>
                 <span class="badge bg-secondary" id="estadoAsistente" role="status">Comprobando conexión…</span>
             </div>
             <div class="alert alert-info small">
-                Esta revisión prepara un borrador. Las reglas activas del catálogo siguen evaluando las operaciones.
-                La publicación de nuevas reglas se incorporará con el motor dinámico.
+                Se aconseña «Guardar como regla» publica en el catálogo tu definición como regla inactiva; pruébala en el campo de desarrolladores y actívala cuando esté lista.
             </div>
             <form id="formAsistenteReglas">
                 <div class="row g-3">
@@ -31,13 +84,14 @@
                         <input id="iaNombre" class="form-control" maxlength="150" placeholder="Monto alto desde un dispositivo nuevo" required>
                     </div>
                     <div class="col-md-4">
-                        <label for="iaPuntos" class="form-label">Puntos de riesgo</label>
-                        <input id="iaPuntos" class="form-control" type="number" min="1" max="100" step="1" value="25" required>
+                        <label for="iaPuntos" class="form-label">Peso relativo (1–100)</label>
+                        <input id="iaPuntos" class="form-control" type="number" min="1" max="100" step="1" value="25" required aria-describedby="iaParticipacion">
+                        <div id="iaParticipacion" class="form-text"></div>
                     </div>
                     <div class="col-12">
                         <label for="iaObjetivo" class="form-label">Objetivo y dudas a revisar (opcional)</label>
                         <textarea id="iaObjetivo" class="form-control" rows="2" maxlength="1000" placeholder="Describe el patrón y las dudas sobre su definición."></textarea>
-                        <div class="form-text">Solo se enviará este formulario a OpenRouter. No incluyas nombres de clientes, cuentas, claves ni datos personales.</div>
+                        <div class="form-text">No incluyas nombres de clientes, cuentas, claves ni datos personales.</div>
                     </div>
                     <div class="col-md-6">
                         <label for="iaCombinacion" class="form-label">Cuándo se aplica</label>
@@ -51,33 +105,15 @@
                     <div class="form-text">Hasta 8 condiciones. El promedio es el gasto promedio guardado del cliente; el país es declarado.</div>
                 </fieldset>
                 <p class="small text-secondary mt-3 mb-2">Las condiciones del formulario son la definición original. Las observaciones de IA no las modifican y los casos sugeridos aún no son pruebas ejecutadas.</p>
-                <button id="iaRevisar" type="submit" class="btn btn-principal" disabled><i class="bi bi-stars"></i> Revisar con IA</button>
+                <button id="iaRevisar" type="submit" class="btn btn-principal" disabled> Revisar</button>
                 <button id="iaExportar" type="button" class="btn btn-secundario ms-2" disabled>Descargar borrador</button>
+                <button id="iaProbar" type="button" class="btn btn-secundario ms-2">Probar sin guardar</button>
+                <button id="iaGuardar" type="button" class="btn btn-secundario ms-2">Guardar como regla (inactiva)</button>
                 <p id="iaMensaje" class="small mt-2 mb-0" role="status" aria-live="polite"></p>
             </form>
             <div id="iaResultado" class="mt-4" aria-live="polite" hidden></div>
-        </section>
-
-        <!-- Catálogo vigente -->
-        <p class="small text-secondary">Las reglas inactivas no aportan puntos en las nuevas evaluaciones. Cambiar su estado no modifica el historial.</p>
-        <p id="estadoReglasMensaje" class="small" role="status" aria-live="polite"></p>
-        <div class="row g-4 mb-5">
-            <div class="col-md-6 col-lg-3" th:each="regla : ${reglas}">
-                <div class="tarjeta-ls h-100 p-4 border-top border-danger border-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="badge bg-secondary dato-mono" th:text="${regla.codigo()}">RF001</span>
-                        <span class="dato-mono fs-3 fw-bold text-danger" th:text="${regla.pesoMaximo()} + ' pts'">25 pts</span>
-                    </div>
-                    <h6 class="fw-bold mb-2" th:text="${regla.nombre()}">Monto Inusual</h6>
-                    <p class="text-secondary small mb-3" th:text="${regla.descripcion()}">Descripción de la regla y condición de disparo.</p>
-                    <span data-estado-regla class="badge" th:classappend="${regla.activa()} ? 'bg-success' : 'bg-secondary'"
-                          th:text="${regla.activa()} ? 'Activa' : 'Inactiva'">Activa</span>
-                    <button th:if="${session.rol == 'ADMIN'}" type="button" class="btn btn-secundario btn-sm mt-2 d-block"
-                            data-cambiar-regla th:attr="data-codigo=${regla.codigo()},data-activa=${regla.activa()},aria-label=(${regla.activa()} ? 'Desactivar ' : 'Activar ') + ${regla.nombre()}"
-                            th:text="${regla.activa()} ? 'Desactivar' : 'Activar'">Desactivar</button>
-                </div>
             </div>
-        </div>
+        </details>
 
         <!-- Matriz de Niveles de Riesgo y Decisiones Sugeridas (Punto 18 PDF) -->
         <div class="tarjeta-ls p-4 border-top border-danger border-3 mb-4">
@@ -122,7 +158,30 @@
             </div>
             <div class="mt-3 p-3 rounded" style="background-color: var(--fondo-input); font-size: 0.85rem; color: var(--texto-secundario);">
                 <i class="bi bi-info-circle-fill text-danger me-1"></i>
-                <strong>Criterio de Normalización:</strong> Los pesos corresponden a los parámetros iniciales de calibración. Si múltiples reglas de alto impacto se activan simultáneamente y la suma bruta excede 100 puntos, el motor aplica una normalización determinística al tope de <strong>100 puntos</strong> según la sección 11.2 y 18 del documento técnico.
+                <strong>Reparto porcentual:</strong> cada regla activa puede aportar como máximo su peso dividido entre la suma de pesos activos, multiplicado por 100. Si todas las señales se cumplen al máximo, el puntaje es <strong>100</strong>; cambiar el catálogo reajusta la participación de cada regla.
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalEstadoRegla" tabindex="-1" aria-labelledby="modalEstadoReglaTitulo" aria-hidden="true" th:if="${session.rol == 'ADMIN'}">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalEstadoReglaTitulo">Confirmar cambio</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cancelar"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="modalEstadoReglaTexto" class="small"></p>
+                    <table class="table table-sm align-middle mb-0">
+                        <caption class="small">Participación de las reglas antes y después del cambio.</caption>
+                        <thead><tr><th scope="col">Regla</th><th scope="col" class="text-end">Ahora</th><th scope="col" class="text-end">Después</th></tr></thead>
+                        <tbody id="modalEstadoReglaImpacto"></tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-principal" id="modalEstadoReglaConfirmar">Confirmar</button>
+                </div>
             </div>
         </div>
     </div>

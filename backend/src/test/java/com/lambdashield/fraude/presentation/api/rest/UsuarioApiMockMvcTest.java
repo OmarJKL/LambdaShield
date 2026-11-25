@@ -1,6 +1,11 @@
 package com.lambdashield.fraude.presentation.api.rest;
 
 import com.lambdashield.fraude.application.service.AuthService;
+import com.lambdashield.fraude.application.service.UsuarioAdminService;
+import com.lambdashield.fraude.application.validation.PoliticaClave;
+import com.lambdashield.fraude.repository.UsuarioSistemaRepository;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.lambdashield.fraude.support.SesionesPrueba;
 
@@ -46,6 +51,10 @@ class UsuarioApiMockMvcTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired private UsuarioAdminService usuarios;
+    @Autowired private UsuarioSistemaRepository repositorio;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     private MockHttpSession sesion(String rol) {
         return SesionesPrueba.crear(authService, rol);
@@ -145,14 +154,14 @@ class UsuarioApiMockMvcTest {
     void analistaYClienteNoGestionanUsuarios() throws Exception {
         for (MockHttpSession sesion : new MockHttpSession[]{sesion("ANALISTA"), sesion("CLIENTE")}) {
             mockMvc.perform(get("/api/v1/user").session(sesion))
-                    .andExpect(status().isForbidden());
+                    .andExpect(SesionesPrueba.alLogin());
             mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf())
                             .session(sesion)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(JSON_NUEVO))
-                    .andExpect(status().isForbidden());
+                    .andExpect(SesionesPrueba.alLogin());
             mockMvc.perform(delete("/api/v1/user/1").with(SesionesPrueba.csrf()).session(sesion))
-                    .andExpect(status().isForbidden());
+                    .andExpect(SesionesPrueba.alLogin());
         }
     }
 
@@ -178,6 +187,49 @@ class UsuarioApiMockMvcTest {
         mockMvc.perform(get("/api/v1/user/999999").session(sesion("ADMIN")))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void altaYCambioRechazanClavesQueSuperan72BytesSinAlterarLaClaveAnterior() throws Exception {
+        String clave = "á".repeat(40);
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf()).session(sesion("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON).content(JSON_NUEVO.replace("claveSegura123", clave)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores[0]").value(PoliticaClave.MENSAJE));
+        long id = repositorio.findByNombreUsuario("analista").orElseThrow().getIdUsuario();
+        mockMvc.perform(patch("/api/v1/user/{id}/clave", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"clave\":\"" + clave + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores[0]").value(PoliticaClave.MENSAJE));
+        org.assertj.core.api.Assertions.assertThat(authService.autenticar("analista", "analista123")).isPresent();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> usuarios.cambiarClave(id, clave))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage(PoliticaClave.MENSAJE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a", "á", "😀"})
+    void aceptaExactamente72BytesYLoginRechazaUnSufijoAdicional(String caracter) throws Exception {
+        int bytes = caracter.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        String clave = caracter.repeat(72 / bytes);
+        mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf()).session(sesion("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON).content(JSON_NUEVO.replace("claveSegura123", clave)))
+                .andExpect(status().isCreated());
+        org.assertj.core.api.Assertions.assertThat(authService.autenticar("nuevo.usuario", clave)).isPresent();
+        org.assertj.core.api.Assertions.assertThat(authService.autenticar("nuevo.usuario", clave + "x")).isEmpty();
+    }
+
+    @Test
+    void usuarioConHistorialAuditadoNoSeEliminaYResponde409() throws Exception {
+        long id = extraerId(mockMvc.perform(post("/api/v1/user").with(SesionesPrueba.csrf()).session(sesion("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON).content(JSON_NUEVO))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        // Fuera del contexto JPA, como un registro histórico que la sesión no tiene cargado.
+        jdbc.update("insert into auditoria (id_usuario, entidad, id_entidad, accion, fecha_evento) "
+                + "values (?, 'prueba', '1', 'PRUEBA', current_timestamp)", id);
+
+        mockMvc.perform(delete("/api/v1/user/{id}", id).with(SesionesPrueba.csrf()).session(sesion("ADMIN")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errores[0]").value(org.hamcrest.Matchers.containsString("datos relacionados")));
     }
 
     private static long extraerId(String json) {

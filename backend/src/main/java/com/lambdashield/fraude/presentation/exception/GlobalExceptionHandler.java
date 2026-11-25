@@ -5,7 +5,11 @@ import com.lambdashield.fraude.application.service.EvaluacionNoEncontradaExcepti
 import com.lambdashield.fraude.application.service.SaldoInsuficienteException;
 import com.lambdashield.fraude.application.service.UsuarioNoEncontradoException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -28,12 +32,14 @@ import java.util.Objects;
  * Manejo global de errores.
  *
  * Para la API responde siempre JSON con la forma {"errores":[...]}:
- *  - 400 para errores de validación
- *  - 404 para cliente inexistente
+ *  - 400 para errores de validación y reglas de negocio
+ *  - 404 para entidades inexistentes
+ *  - 409 cuando una restricción de integridad impide el cambio
  * Para las páginas se conserva la vista error.html.
  */
 @ControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     @ExceptionHandler(com.lambdashield.fraude.application.service.ReglaNoEncontradaException.class)
     public ResponseEntity<Map<String, List<String>>> handleReglaNoEncontrada(
             com.lambdashield.fraude.application.service.ReglaNoEncontradaException ex) {
@@ -125,6 +131,13 @@ public class GlobalExceptionHandler {
                 .body(Map.of("errores", List.of("Tipo de contenido no soportado; use application/json")));
     }
 
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, List<String>>> handleIntegridad(DataIntegrityViolationException ex) {
+        log.warn("Operación rechazada por una restricción de integridad", ex);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("errores", List.of(
+                "No se puede completar la operación porque el registro tiene datos relacionados")));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, List<String>>> handleIllegalArgument(IllegalArgumentException ex) {
         return ResponseEntity.badRequest()
@@ -132,12 +145,14 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public Object handleException(Exception ex, HttpServletRequest request, Model model) {
+    public Object handleException(Exception ex, HttpServletRequest request, HttpServletResponse response, Model model) {
+        log.error("Error interno al procesar una solicitud", ex);
         if (request.getRequestURI().startsWith(request.getContextPath() + "/api/")) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("errores", List.of("Error interno del servidor")));
         }
-        model.addAttribute("error", mensajeSeguro(ex));
+        response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
+        model.addAttribute("error", "Error interno del servidor");
         return "error";
     }
 

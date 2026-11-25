@@ -1,8 +1,8 @@
 # Lambda Shield — Sistema de detección de fraude bancario
 
-Aplicación académica que evalúa operaciones antes de modificar el saldo de una cuenta. Combina un portal de cliente, un panel de análisis y un motor explicable de ocho reglas. La evaluación, sus factores y las operaciones se persisten mediante JPA.
+Aplicación académica que evalúa operaciones antes de modificar el saldo de una cuenta. Combina un portal de cliente, un panel de análisis y un motor explicable con ocho reglas en Java y reglas definidas por el administrador desde un formulario tipado. La evaluación, sus factores y las operaciones se persisten mediante JPA.
 
-**Estado documentado: 14 de noviembre de 2026.** Se conserva Spring MVC con **Thymeleaf**, CSS y JavaScript vanilla. Las páginas y las APIs conviven en el mismo artefacto Maven; no se está migrando a un frontend separado.
+**Estado documentado: 24 de noviembre de 2026.** Se conserva Spring MVC con **Thymeleaf**, CSS y JavaScript vanilla. Las páginas y las APIs conviven en el mismo artefacto Maven; no se está migrando a un frontend separado.
 
 ## 1. Guía de lectura
 
@@ -18,7 +18,7 @@ Aplicación académica que evalúa operaciones antes de modificar el saldo de un
 | Integrar un cliente HTTP | [Referencia de API](docs/07_API_REST.md) |
 | Ejecutar y mantener las verificaciones | [Pruebas y calidad](docs/09_PRUEBAS_CALIDAD.md) |
 | Usar cuentas con historial ya preparado | [Cuentas y accesos demo](docs/11_CUENTAS_Y_ACCESOS_DEMO.md) |
-| Estudiar evolución pendiente del motor | [Reglas dinámicas y Qwen](docs/10_PROPUESTA_REGLAS_DINAMICAS_LLM.md) |
+| Estudiar evolución pendiente del motor | [Reglas dinámicas y LLM](docs/10_PROPUESTA_REGLAS_DINAMICAS_LLM.md) |
 | Configurar el asistente de revisión con OpenRouter | [Asistente de reglas IA](docs/12_ASISTENTE_REGLAS_IA.md) |
 | Revisar congruencia, limpieza y deuda técnica | [Revisión de código](docs/13_REVISION_CONGRUENCIA_CODIGO.md) |
 
@@ -79,11 +79,12 @@ Copy-Item .env.example .env
 Edita `.env` con las credenciales de tu base. Para una instalación local de demostración, configura explícitamente:
 
 ```properties
+SPRING_PROFILES_ACTIVE=dev
 DEMO_DATA_ENABLED=true
 SESSION_COOKIE_SECURE=false
 ```
 
-La carga demo está desactivada por defecto. Para ocho cuentas adicionales y 128 operaciones persistentes, ver [cuentas y accesos](docs/11_CUENTAS_Y_ACCESOS_DEMO.md). Sin ella, los clientes, usuarios, roles y reglas deben estar provisionados en la base. No existe registro público ni un endpoint de bootstrap del primer administrador.
+La carga demo está desactivada por defecto. Para ocho cuentas adicionales y 5 252 operaciones persistentes (un año de historial), ver [cuentas y accesos](docs/11_CUENTAS_Y_ACCESOS_DEMO.md). Sin ella, los clientes, usuarios, roles y reglas deben estar provisionados en la base. No existe registro público ni un endpoint de bootstrap del primer administrador.
 
 Si usas el PostgreSQL de Compose:
 
@@ -95,13 +96,13 @@ docker compose ps
 Compose levanta solo la base y aplica el esquema al inicializar un volumen vacío. Para PostgreSQL instalado directamente o una base existente, sigue los comandos y las precauciones de [instalación](docs/08_INSTALACION_OPERACION.md).
 
 ```powershell
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
 En Linux/macOS:
 
 ```bash
-sh ./mvnw spring-boot:run
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 Abre [la aplicación local](http://localhost:8080). Las claves demo están en el sembrador del repositorio y se destinan exclusivamente a desarrollo. Desactivar la carga demo no elimina ni cambia cuentas ya creadas.
@@ -115,10 +116,11 @@ Abre [la aplicación local](http://localhost:8080). Las claves demo están en el
 | `DB_HOST` | `localhost` | Servidor PostgreSQL |
 | `DB_PORT` | `5432` | Puerto de conexión y puerto publicado por Compose |
 | `DB_NAME` | `lambda_shield` | Base de datos |
-| `DB_USER` / `DB_PASSWORD` | `postgres` / `postgres` | Valores de desarrollo; cambiar al desplegar |
+| `SPRING_PROFILES_ACTIVE` | Sin perfil | `dev` para desarrollo local; `prod` para HTTPS |
+| `DB_USER` / `DB_PASSWORD` | Obligatorios; `postgres` / `postgres` solo en `dev` | Credenciales de la base |
 | `DEMO_DATA_ENABLED` | `false` | Crear los fixtures demo originales al arrancar |
-| `DEMO_DATASET_ENABLED` | `false` | Cargar ocho cuentas adicionales y 128 operaciones históricas, sin duplicarlas |
-| `SESSION_COOKIE_SECURE` | `false` | Activar en un despliegue exclusivamente HTTPS |
+| `DEMO_DATASET_ENABLED` | `false` | Cargar ocho cuentas adicionales y 5 252 operaciones históricas, sin duplicarlas |
+| `SESSION_COOKIE_SECURE` | `true`; `false` en `dev` | En `prod` la cookie siempre es Secure |
 | `LOGIN_RATE_LIMIT` | `10` | Intentos de login por IP y minuto |
 | `API_RATE_LIMIT` | `120` | Peticiones API por identidad y minuto |
 | `API_WRITE_RATE_LIMIT` | `40` | Escrituras API por identidad y minuto |
@@ -153,15 +155,17 @@ Las APIs viven bajo `/api/v1`. Se autentican con sesión HTTP, no con JWT, API k
 | --- | --- | --- |
 | `/evaluation` | Crear, listar, desactivar y reactivar evaluaciones | ADMIN; CLIENTE solo crea para su cliente; ANALISTA solo lee |
 | `/metric` | KPIs, resumen financiero y movimientos | ADMIN y ANALISTA |
-| `/rule` | Consultar reglas activas | ADMIN y ANALISTA |
+| `/rule` | Consultar reglas activas; activar/desactivar y asistente IA solo ADMIN | ADMIN y ANALISTA |
+| `/notification` | Bandeja de avisos propia | CLIENTE |
+| `/account/destination` | Titular de una cuenta interna de destino | CLIENTE |
 | `/report/export` | Exportar evaluaciones filtradas | ADMIN y ANALISTA |
 | `/user` | Gestión de usuarios | ADMIN |
 
 Las escrituras exigen CSRF incluso durante login y logout. Los tokens se integran mediante Thymeleaf y `auth.js`. Las sesiones se revalidan contra la base: bloquear/eliminar usuarios o cambiar su clave revoca el acceso en la siguiente petición admitida por los límites.
 
-Respuestas habituales: `401` sin identidad válida, `403` por permisos o CSRF, `400` por validación, `404` por una entidad ausente y `429` por exceso de solicitudes. Los formatos de error difieren entre filtros y validaciones; consulta la [referencia completa](docs/07_API_REST.md).
+Respuestas habituales: una API sin identidad válida, sin permiso o con CSRF inválido responde con una redirección 302 a `/login`, sin cuerpo ni mensaje; si había una sesión, se cierra. `400` por validación, `404` por una entidad ausente, `409` por datos relacionados y `429` por exceso de solicitudes. Consulta la [referencia completa](docs/07_API_REST.md).
 
-Para producción: HTTPS, `SESSION_COOKIE_SECURE=true`, credenciales propias y carga demo desactivada. Las sesiones y los límites viven en memoria por instancia; no constituyen una configuración de alta disponibilidad distribuida.
+Para producción, ejecuta el JAR con `--spring.profiles.active=prod` y configura `DB_USER` y `DB_PASSWORD`. Este perfil redirige HTTP a HTTPS, exige cookies Secure y deshabilita ambas cargas demo y el SQL de depuración. Debes proporcionar TLS en el servidor o en un proxy confiable; el perfil no instala certificados. No reutilices el archivo `.env` local. Las sesiones y los límites viven en memoria por instancia; no constituyen una configuración de alta disponibilidad distribuida.
 
 ## 8. Reglas y consistencia financiera
 
@@ -172,7 +176,7 @@ Para producción: HTTPS, `SESSION_COOKIE_SECURE=true`, credenciales propias y ca
 | 60–79 | ALTO | RETENER | RETENIDA | Sin movimiento |
 | 80–100 | CRITICO | BLOQUEAR | BLOQUEADA | Sin movimiento |
 
-El catálogo controla activación y peso; las implementaciones Java calculan la señal relativa. Se guardan puntajes, motivos y copias de etiqueta, máximo y versión. Desactivar revierte el movimiento cuando lo hubo; reactivar restaura el estado derivado del nivel guardado, sin ejecutar otra vez el motor.
+El catálogo controla activación y peso. El peso es relativo: las reglas activas se reparten el 100 % del puntaje (máximo de cada una = peso ÷ suma de pesos activos × 100), y activar, desactivar o agregar una regla reajusta al resto. Las implementaciones Java y las reglas definidas (RC) calculan la intensidad de la señal. Se guardan puntajes, motivos y copias de etiqueta, máximo y versión. Desactivar revierte el movimiento cuando lo hubo; reactivar restaura el estado derivado del nivel guardado, sin ejecutar otra vez el motor.
 
 El dashboard financiero incluye únicamente transacciones `APROBADA`. Los KPIs de riesgo cuentan evaluaciones activas, incluidas retenidas y bloqueadas: son métricas distintas. `days=7` significa hoy más los siete días anteriores, es decir, ocho fechas.
 
@@ -183,7 +187,7 @@ El dashboard financiero incluye únicamente transacciones `APROBADA`. Los KPIs d
 node --test frontend/tests/*.test.cjs
 ```
 
-La última ejecución disponible registra **137 verificaciones Java** y **23 pruebas JavaScript**, sin fallos. Java se ejecutó localmente con JDK 24 compilando para Java 21; CI configura JDK 21 y Node.js 22. Los conteos son una referencia del estado documentado, no un mínimo de cobertura obligatorio.
+La última ejecución disponible registra **166 verificaciones Java** y **40 pruebas JavaScript**, sin fallos. Java se ejecutó localmente con JDK 21. Maven usa el JDK de `JAVA_HOME` o del `PATH`: con JDK 17 la suite falla con «class file version 65.0» antes de ejecutar pruebas; CI configura JDK 21 y Node.js 22. Los conteos son una referencia del estado documentado, no un mínimo de cobertura obligatorio.
 
 Las pruebas Java usan H2 en modo PostgreSQL y no necesitan una instancia PostgreSQL. Incluyen seguridad, CSRF, concurrencia, importes exactos, consultas por lote y arquitectura. El reporte de cobertura se genera en `target/site/jacoco/index.html`.
 
@@ -191,6 +195,6 @@ Las pruebas Java usan H2 en modo PostgreSQL y no necesitan una instancia Postgre
 
 ## 10. Alcance actual
 
-Se conservan las 18 entidades del esquema académico y se incorpora `NotificacionUsuario` (19 entidades). Alertas, casos, historial de casos, auditoría y características no tienen un flujo completo de aplicación. Los avisos del portal se persisten por usuario para bloqueos y retenciones, con estado de lectura independiente. No sustituyen la entidad de alerta formal ni un caso de investigación.
+Se conservan las 18 entidades del esquema académico y se incorpora `NotificacionUsuario` (19 entidades). Alertas, casos, historial de casos y características no tienen un flujo completo de aplicación; `auditoria` solo registra la activación y desactivación de reglas. Los avisos del portal se persisten por usuario para bloqueos y retenciones, con estado de lectura independiente. No sustituyen la entidad de alerta formal ni un caso de investigación.
 
 El país es declarado, la huella de dispositivo es una normalización del User-Agent y RF007 no mide distancias reales. No hay MFA, notificaciones externas, reconciliación bancaria ni evidencia de cumplimiento regulatorio. Las limitaciones y futuras mejoras están separadas de lo implementado en [valor de negocio](docs/05_VALOR_NEGOCIO.md).

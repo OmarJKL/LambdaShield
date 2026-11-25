@@ -5,15 +5,12 @@ import com.lambdashield.fraude.application.service.*;
 import com.lambdashield.fraude.domain.entity.*;
 import com.lambdashield.fraude.domain.enums.EstadoTransaccion;
 import com.lambdashield.fraude.repository.*;
-import com.lambdashield.fraude.presentation.security.SessionValidationFilter;
 import com.lambdashield.fraude.support.SesionesPrueba;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -37,13 +34,7 @@ class NotificacionesApiMockMvcTest {
     @Autowired BeneficiarioRepository beneficiarios;
 
     private MockHttpSession sesion(String nombre) {
-        var usuario = auth.obtenerSesionActiva(nombre).orElseThrow();
-        var contexto = SecurityContextHolder.createEmptyContext();
-        contexto.setAuthentication(SessionValidationFilter.authentication(usuario));
-        var sesion = new MockHttpSession();
-        sesion.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, contexto);
-        SessionValidationFilter.actualizarSesion(sesion, usuario);
-        return sesion;
+        return SesionesPrueba.deUsuario(auth, nombre);
     }
     private Long bloqueada(String cliente) {
         return operaciones.crearYEvaluar(new EvaluarTransaccionCommand(cliente, new BigDecimal("20000.00"),
@@ -71,8 +62,9 @@ class NotificacionesApiMockMvcTest {
     @Test
     void retencionTambienAvisaYAprobadaNoCreaAviso() {
         long antes = notificaciones.listar("usuario", 0).noLeidas();
+        // 132 de 175 puntos de referencia → 77 % del puntaje: ALTO.
         var retenida = operaciones.crearYEvaluar(new EvaluarTransaccionCommand("C-001", new BigDecimal("540"),
-                "servicios", 2, "local", "nuevo", 3, "recurrente", "nueva", null));
+                "servicios", 2, "alto_riesgo", "nuevo", 3, "recurrente", "nueva", null));
         assertThat(retenida.nivel()).isEqualTo("alto");
         assertThat(aviso("usuario", retenida.idInterno()).getTipo()).isEqualTo(EstadoTransaccion.RETENIDA);
         operaciones.crearYEvaluar(new EvaluarTransaccionCommand("C-001", new BigDecimal("1"),
@@ -88,7 +80,7 @@ class NotificacionesApiMockMvcTest {
         mvc.perform(patch("/api/v1/notification/{id}/leer", otro).session(sesion("usuario")).with(SesionesPrueba.csrf()))
                 .andExpect(status().isNotFound());
         mvc.perform(patch("/api/v1/notification/{id}/leer", id).session(sesion("usuario")))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
         mvc.perform(patch("/api/v1/notification/{id}/leer", id).session(sesion("usuario")).with(SesionesPrueba.csrf()))
                 .andExpect(status().isNoContent());
         mvc.perform(patch("/api/v1/notification/{id}/leer", id).session(sesion("usuario")).with(SesionesPrueba.csrf()))
@@ -108,9 +100,9 @@ class NotificacionesApiMockMvcTest {
     }
     @Test
     void bandejaNoSeExponeAAdministradoresAnalistasOSesionesAusentes() throws Exception {
-        mvc.perform(get("/api/v1/notification")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/v1/notification").session(sesion("admin"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/v1/notification").session(sesion("analista"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/notification")).andExpect(SesionesPrueba.alLogin());
+        mvc.perform(get("/api/v1/notification").session(sesion("admin"))).andExpect(SesionesPrueba.alLogin());
+        mvc.perform(get("/api/v1/notification").session(sesion("analista"))).andExpect(SesionesPrueba.alLogin());
         mvc.perform(get("/api/v1/notification?pagina=-1").session(sesion("usuario"))).andExpect(status().isBadRequest());
     }
     @Test
@@ -154,7 +146,7 @@ class NotificacionesApiMockMvcTest {
     @Test
     void consultaDeTitularExigeSesionYDevuelveSoloDatosDeDestino() throws Exception {
         mvc.perform(get("/api/v1/account/destination").param("numero", "0011-0145-0200847292"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(SesionesPrueba.alLogin());
         mvc.perform(get("/api/v1/account/destination").param("numero", "0011-0145-0200847292").session(sesion("usuario")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.nombre").value("Jorge Salas Mendoza"))
                 .andExpect(jsonPath("$.banco").value("lambda")).andExpect(jsonPath("$.saldoDisponible").doesNotExist());
@@ -165,7 +157,7 @@ class NotificacionesApiMockMvcTest {
         mvc.perform(get("/api/v1/account/destination").param("numero", "incorrecto").session(sesion("usuario")))
                 .andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/account/destination").param("numero", "0011-0145-0200847292").session(sesion("analista")))
-                .andExpect(status().isForbidden());
+                .andExpect(SesionesPrueba.alLogin());
         var destino = cuentas.findByNumeroCuenta("0011-0145-0200847292").orElseThrow();
         destino.setEstadoCuenta(com.lambdashield.fraude.domain.enums.EstadoCuenta.BLOQUEADA);
         cuentas.saveAndFlush(destino);

@@ -53,11 +53,12 @@ Spring importa `optional:file:./.env[.properties]` desde el directorio de ejecuc
 | `DB_HOST` | `localhost` | Host accesible desde el proceso Java |
 | `DB_PORT` | `5432` | Puerto del host; Compose lo publica al 5432 del contenedor |
 | `DB_NAME` | `lambda_shield` | La base debe existir |
-| `DB_USER` | `postgres` | Usar un usuario apropiado para cada entorno |
-| `DB_PASSWORD` | `postgres` | Valor de desarrollo, no credencial productiva |
+| `SPRING_PROFILES_ACTIVE` | Sin perfil | Usar `dev` localmente y `prod` en producción |
+| `DB_USER` | Obligatorio; `postgres` en `dev` | Usar un usuario apropiado para cada entorno |
+| `DB_PASSWORD` | Obligatorio; `postgres` en `dev` | Credencial propia fuera de desarrollo |
 | `DEMO_DATA_ENABLED` | `false` | Activa `DataInitializer` al ser true |
 | `DEMO_DATASET_ENABLED` | `false` | Activa la carga ampliada de cuentas e historial |
-| `SESSION_COOKIE_SECURE` | `false` | True cuando se sirve exclusivamente por HTTPS |
+| `SESSION_COOKIE_SECURE` | `true`; `false` en `dev` | En `prod` se fija siempre en true |
 | `LOGIN_RATE_LIMIT` | `10` | Intentos de login/minuto/IP |
 | `API_RATE_LIMIT` | `120` | API/minuto/identidad o IP |
 | `API_WRITE_RATE_LIMIT` | `40` | Escrituras/minuto/identidad o IP |
@@ -178,20 +179,20 @@ La carga usa identidades de operación estables y no restablece contraseñas o s
 Desarrollo, PowerShell:
 
 ```powershell
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
 Linux/macOS:
 
 ```bash
-sh ./mvnw spring-boot:run
+sh ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 Empaquetar, ejecutando las pruebas:
 
 ```powershell
 .\mvnw.cmd clean package
-java -jar target/fraude-0.0.1-SNAPSHOT.jar
+java -jar target/fraude-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
 ```
 
 Ejecutar desde la raíz permite cargar `.env`. El JAR contiene backend, plantillas Thymeleaf y recursos estáticos. No existe un proceso frontend separado que haya que levantar.
@@ -216,8 +217,8 @@ El runtime valida el esquema durante el arranque. No se recomienda usar un arran
 | Error de validación de esquema | Base correcta, script nuevo frente a migración y columnas pendientes |
 | Base nueva sin usuarios o reglas | Siembra desactivada o aprovisionamiento incompleto |
 | Un login vuelve a `/login?error` | Estado, clave, rol activo y resultado del formulario; no se revela públicamente qué comprobación falló |
-| 401 en API | Cookie ausente, sesión vencida, usuario eliminado/bloqueado o clave cambiada |
-| 403 al escribir | Primero verificar token y cookie de la misma sesión; después ruta, método y rol |
+| API redirige a `/login` | Cookie ausente, sesión vencida, usuario eliminado/bloqueado o clave cambiada; también rol sin permiso o CSRF inválido |
+| Escritura redirige a `/login` | Verificar token y cookie de la misma sesión; después ruta, método y rol. La sesión anterior queda cerrada |
 | 429 | Esperar el plazo indicado; revisar tráfico automático/polling y configuración del límite |
 | No aparece un historial en portal | Vínculo de cliente activo y evaluaciones activas propias |
 | Simulador falla con códigos demo | El generador automático presupone C-001/C-002/C-003 |
@@ -230,6 +231,8 @@ Los errores internos de API no exponen stacktraces al cliente. Investigar el det
 ## 10. Configuración de despliegue
 
 Antes de exponer la aplicación: HTTPS, cookies Secure, credenciales de base propias, demo desactivada, revisión de cuentas existentes, secretos fuera del repositorio, copias/restauración y política de logs.
+
+Ejecuta `java -jar target/fraude-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod` con `DB_USER` y `DB_PASSWORD` definidos. El perfil `prod` fija cookies Secure, redirección a HTTPS, SQL desactivado y ambas cargas demo deshabilitadas. Usa un archivo de entorno propio del despliegue, sin el perfil `dev`. El perfil no configura certificados: proporciona TLS en el servidor o en un proxy. Si TLS termina en un proxy, configura únicamente sus direcciones como proxies confiables para que las peticiones reenviadas se reconozcan como HTTPS; no habilites confianza global en cabeceras de clientes externos.
 
 El servidor conserva sesiones en memoria por defecto. Un reinicio requiere volver a iniciar sesión; varias réplicas necesitan una estrategia compartida o afinidad apropiada. Los límites también son por instancia; el proxy debe cubrir la política global y la IP confiable.
 

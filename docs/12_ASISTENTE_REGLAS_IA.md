@@ -1,4 +1,4 @@
-# 12 — Asistente de reglas con Qwen Plus mediante OpenRouter
+# 12 — Asistente de reglas con Nemotron 3.5 Super VL mediante OpenRouter
 
 [Índice](README.md) · [Evolución del motor](10_PROPUESTA_REGLAS_DINAMICAS_LLM.md)
 
@@ -6,7 +6,12 @@
 
 El administrador abre `/reglas` y completa un formulario de definición. El backend valida sus campos antes de solicitar una revisión a OpenRouter. Devuelve la definición original separada de la interpretación, advertencias, sugerencias y casos propuestos por el modelo.
 
-Esta entrega no publica reglas, no ejecuta los casos sugeridos, no cambia las ocho reglas RF001–RF008 y no añade inferencia a las transacciones financieras. El resultado es un borrador temporal en el navegador; puede descargarse como JSON. Recargar la página lo descarta. Una revisión generada no demuestra que una regla sea correcta ni que detecte fraude.
+La revisión no publica nada, no ejecuta los casos sugeridos y no añade inferencia a las transacciones financieras. El resultado es un borrador en el navegador que puede descargarse como JSON. Desde el mismo formulario, sin depender de OpenRouter:
+
+- **Probar sin guardar** lleva la definición al campo de desarrolladores (almacenamiento de la pestaña) para compararla con el catálogo vigente.
+- **Guardar como regla (inactiva)** crea una regla RC con la definición del administrador; el análisis de la IA no se guarda ni la modifica. Ver [reglas definidas](03_REGLAS_ANTIFRAUDE.md).
+
+El campo «Peso relativo» indica qué porcentaje del puntaje aportaría la regla si se activara junto a las reglas activas actuales. Una revisión generada no demuestra que una regla sea correcta ni que detecte fraude.
 
 ## Configuración local
 
@@ -16,7 +21,7 @@ En `.env`, que está excluido de Git:
 LLM_ENABLED=true
 LLM_API_KEY=
 LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=qwen/qwen-plus
+LLM_MODEL=nvidia/nemotron-3.5-super-vl:free
 LLM_TIMEOUT_SECONDS=25
 LLM_DISABLE_THINKING=true
 ```
@@ -27,9 +32,9 @@ Solo se admite `https://openrouter.ai/api/v1`, con puerto predeterminado o 443 y
 
 Reiniciar Spring Boot después de editar `.env`. El indicador **Configurado** verifica presencia y formato de configuración, no la validez de la clave ni la disponibilidad del modelo. `detalle` señala la variable pendiente o el formato incorrecto sin revelar sus valores. La primera revisión permite comprobar el acceso real.
 
-Se usa `qwen/qwen-plus`, el identificador de Qwen Plus en OpenRouter, sujeto a disponibilidad y saldo de la cuenta. Se solicita salida `json_object` y se valida el contrato en Java. `LLM_DISABLE_THINKING=true` envía `reasoning: {"enabled": false}`; con `false` omite ese parámetro. No se envía el parámetro específico de Alibaba `enable_thinking`.
+Se usa `nvidia/nemotron-3.5-super-vl:free` (NVIDIA Nemotron 3.5 Super VL, variante gratuita de OpenRouter), que también es el valor por defecto de `LLM_MODEL`. Las variantes `:free` no consumen saldo, pero tienen límites de solicitudes más estrictos y su disponibilidad puede variar; ante 429 conviene esperar o usar la variante de pago `nvidia/nemotron-3.5-super-vl`. Se puede cambiar a otro modelo de OpenRouter siempre que admita `structured_outputs`. Se solicita salida estructurada con esquema estricto (`json_schema`: exactamente cuatro campos, límites de tamaño y al menos dos pruebas) y el contrato se vuelve a validar en Java. Con `json_object` algunos modelos, como `nvidia/nemotron-3.5-super-vl:free`, devolvían a veces solo `interpretacion` y la revisión se rechazaba con 502. El modelo elegido en `LLM_MODEL` debe admitir `structured_outputs` en el catálogo de OpenRouter. `LLM_DISABLE_THINKING=true` envía `reasoning: {"enabled": false}`; con `false` omite ese parámetro. No se envía el parámetro específico de Alibaba `enable_thinking`.
 
-La aplicación no configura límites de gasto en la cuenta. HTTP 402 produce un mensaje de créditos insuficientes; 401/403 indican revisar clave y permisos; 429 indica cuota o límite de solicitudes. No se muestra el cuerpo del proveedor. Referencias oficiales: [Qwen Plus](https://openrouter.ai/qwen/qwen-plus), [razonamiento](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), [errores](https://openrouter.ai/docs/api/reference/errors-and-debugging). Consultado el 20/11/2026.
+La aplicación no configura límites de gasto en la cuenta. HTTP 402 produce un mensaje de créditos insuficientes; 401/403 indican revisar clave y permisos; 429 indica cuota o límite de solicitudes. No se muestra el cuerpo del proveedor. Referencias oficiales: [Nemotron 3.5 Super VL](https://openrouter.ai/nvidia/nemotron-3.5-super-vl:free), [razonamiento](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), [errores](https://openrouter.ai/docs/api/reference/errors-and-debugging). Consultado el 25/11/2026.
 
 ## Formulario y significado técnico
 
@@ -76,7 +81,7 @@ Ejemplo de entrada:
 
 Respuesta: `{ "definicion": <entrada>, "revision": { "interpretacion": "...", "advertencias": [], "sugerencias": [], "pruebas": ["...", "..."] } }`.
 
-Errores: 400 validación local; 401 sin sesión; 403 rol o CSRF; 429 límite local; 503 configuración ausente, ocupación, conectividad, acceso rechazado o cuota del proveedor; 502 respuesta inválida/truncada u otro error del proveedor. Los cuerpos del proveedor y la API key no se devuelven al navegador ni se registran desde el adaptador.
+Errores: 400 validación local; sin sesión, sin rol ADMIN o sin CSRF, redirección al login sin mensaje; 429 límite local; 503 configuración ausente, ocupación, conectividad, acceso rechazado o cuota del proveedor; 502 respuesta inválida/truncada u otro error del proveedor. Los cuerpos del proveedor y la API key no se devuelven al navegador ni se registran desde el adaptador.
 
 ## Transporte y controles
 
@@ -90,11 +95,11 @@ Máximo de salida solicitado: 1600 tokens. Dos consultas simultáneas por instan
 
 Pruebas del adaptador con transporte simulado: hosts, errores, salida estructurada, truncamiento y timeout. Pruebas MVC: roles, CSRF, condiciones inválidas y separación entre definición y sugerencias. Pruebas JavaScript: controles tipados, cantidad de condiciones, revisión invalidada al editar y mensajes del proveedor.
 
-La prueba real requiere configurar una clave de OpenRouter válida y ejecutar una revisión ficticia. Las pruebas simuladas no demuestran conexión real, calidad del modelo ni cuota disponible. Sigue pendiente publicar/activar nuevas reglas, conservar versiones y revisiones en BD, ejecutar comparaciones y evaluar transacciones mediante el LLM. Esas capacidades se describen en la propuesta 10.
+La prueba real requiere configurar una clave de OpenRouter válida y ejecutar una revisión ficticia. Las pruebas simuladas no demuestran conexión real, calidad del modelo ni cuota disponible. Ya se pueden guardar, probar y activar reglas definidas. Siguen pendientes las versiones editables de una regla, conservar las revisiones de IA en BD y evaluar transacciones mediante el LLM. Esas capacidades se describen en la propuesta 10.
 
 
 ## Migración a OpenRouter (20/11/2026)
 
-Se reemplazó el adaptador de Alibaba por OpenRouter, manteniendo Qwen Plus. Se actualizaron el endpoint permitido, el identificador del modelo, el parámetro de razonamiento y los mensajes de error. La prueba anterior de Alibaba del 18/11/2026 terminó en HTTP 403 y no valida esta integración.
+Se reemplazó el adaptador de Alibaba por OpenRouter, en ese momento con Qwen Plus (`qwen/qwen-plus`); el modelo en uso pasó después a Nemotron 3.5 Super VL. Se actualizaron el endpoint permitido, el identificador del modelo, el parámetro de razonamiento y los mensajes de error. La prueba anterior de Alibaba del 18/11/2026 terminó en HTTP 403 y no valida esta integración.
 
 Las pruebas automatizadas usan transporte simulado y claves ficticias. La conectividad e inferencia reales con OpenRouter quedan pendientes de configurar una clave válida y ejecutar una revisión ficticia.

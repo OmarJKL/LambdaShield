@@ -16,6 +16,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.SecurityFilterChain;
@@ -48,7 +49,9 @@ public class SecurityConfig {
                                             @Value("${security.rate-limit.login-per-minute:10}") int logins,
                                             @Value("${security.rate-limit.api-per-minute:120}") int peticiones,
                                             @Value("${security.rate-limit.writes-per-minute:40}") int cambios,
-                                            @Value("${security.rate-limit.assistant-per-minute:6}") int revisiones) throws Exception {
+                                            @Value("${security.rate-limit.assistant-per-minute:6}") int revisiones,
+                                            @Value("${security.require-https:false}") boolean requiereHttps) throws Exception {
+        if (requiereHttps) http.redirectToHttps(Customizer.withDefaults());
         http.authenticationProvider(proveedor)
                 .addFilterBefore(new SessionValidationFilter(auth), CsrfFilter.class)
                 .addFilterBefore(new RequestRateLimitFilter(logins, peticiones, cambios, revisiones), SessionValidationFilter.class)
@@ -72,13 +75,13 @@ public class SecurityConfig {
                 .requestCache(cache -> cache.disable())
                 .exceptionHandling(errores -> errores
                         .authenticationEntryPoint((request, response, ex) -> {
-                            if (esApi(request)) json(response, 401, "No autenticado");
-                            else if (ruta(request).startsWith("/actuator/")) response.sendError(404);
-                            else response.sendRedirect(request.getContextPath() + "/login");
+                            if (ruta(request).startsWith("/actuator/")) response.sendError(404);
+                            else alLogin(request, response);
                         })
                         .accessDeniedHandler((request, response, ex) -> {
-                            if (ex instanceof CsrfException) json(response, 403, "Token CSRF ausente o inválido");
-                            else if (esApi(request)) json(response, 403, "No autorizado");
+                            // API sin permiso o con CSRF inválido: se cierra la sesión y se vuelve al login sin mensaje.
+                            if (esApi(request)) alLogin(request, response);
+                            else if (ex instanceof CsrfException) json(response, 403, "Token CSRF ausente o inválido");
                             else {
                                 var identidad = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
                                 var destino = policy.redireccionPagina(rol(identidad), ruta(request));
@@ -90,6 +93,17 @@ public class SecurityConfig {
                         .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.SAME_ORIGIN))
                         .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")));
         return http.build();
+    }
+
+    /**
+     * Redirección silenciosa al login. Si existe una sesión se invalida: el login envía a su
+     * página de inicio a quien sigue autenticado, y el usuario debe volver a identificarse.
+     */
+    private static void alLogin(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        var sesion = request.getSession(false);
+        if (sesion != null) sesion.invalidate();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        response.sendRedirect(request.getContextPath() + "/login");
     }
 
     private static String rol(Authentication identidad) {

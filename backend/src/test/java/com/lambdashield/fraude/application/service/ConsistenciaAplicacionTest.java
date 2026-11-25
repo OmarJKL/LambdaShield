@@ -75,7 +75,8 @@ class ConsistenciaAplicacionTest {
         regla.setPeso(new BigDecimal("30"));
         regla.setNombreRegla("Dispositivo versión de prueba");
         var primera = operaciones.crearYEvaluar(comando("1.01", "nuevo"));
-        assertThat(primera.puntaje()).isEqualTo(30);
+        // Peso relativo: 30 / (175 - 15 + 30) × 100 = 15,8 → 16 puntos sobre 100.
+        assertThat(primera.puntaje()).isEqualTo(16);
         regla.setPeso(new BigDecimal("60"));
         regla.setNombreRegla("Nombre posterior");
         regla.setEsActiva(false);
@@ -86,7 +87,7 @@ class ConsistenciaAplicacionTest {
         em.clear();
         var historial = consultas.listar(true).stream().filter(e -> e.idInterno().equals(primera.idInterno())).findFirst().orElseThrow();
         assertThat(historial.factores()).isEqualTo(primera.factores());
-        assertThat(historial.factores().stream().filter(f -> f.id().equals("dispositivo")).findFirst().orElseThrow().max()).isEqualTo(30);
+        assertThat(historial.factores().stream().filter(f -> f.id().equals("dispositivo")).findFirst().orElseThrow().max()).isEqualTo(16);
     }
 
     @Test

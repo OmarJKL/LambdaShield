@@ -3,6 +3,7 @@ package com.lambdashield.fraude.application.service;
 import com.lambdashield.fraude.domain.customer.NombreClienteFormatter;
 import com.lambdashield.fraude.domain.entity.Cliente;
 import com.lambdashield.fraude.domain.entity.Cuenta;
+import com.lambdashield.fraude.domain.enums.EstadoCuenta;
 import com.lambdashield.fraude.repository.ClienteRepository;
 import com.lambdashield.fraude.repository.CuentaRepository;
 import java.math.BigDecimal;
@@ -55,16 +56,20 @@ public class ClienteService {
                 .toList();
     }
 
+    /** Primera cuenta ACTIVA del cliente, bloqueada para escribir durante la transacción. */
     @Transactional
     public Cuenta obtenerCuentaPrincipal(Cliente cliente) {
-        return cuentaRepository.findFirstByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente())
-                .filter(c -> c.getEstadoCuenta() == com.lambdashield.fraude.domain.enums.EstadoCuenta.ACTIVA)
-                .orElseThrow(() -> new IllegalStateException(
-                        "El cliente " + cliente.getCodigoCliente() + " no tiene una cuenta registrada"));
+        return cuentaRepository.findFirstByCliente_IdClienteAndEstadoCuentaOrderByIdCuentaAsc(
+                        cliente.getIdCliente(), EstadoCuenta.ACTIVA)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "El cliente " + cliente.getCodigoCliente() + " no tiene una cuenta activa"));
     }
 
     private ClienteInfo toInfo(Cliente cliente) {
-        Cuenta cuenta = cuentaRepository.findTopByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente())
+        // Misma cuenta que usan las operaciones; sin cuenta activa se muestra la primera registrada.
+        Cuenta cuenta = cuentaRepository.findTopByCliente_IdClienteAndEstadoCuentaOrderByIdCuentaAsc(
+                        cliente.getIdCliente(), EstadoCuenta.ACTIVA)
+                .or(() -> cuentaRepository.findTopByCliente_IdClienteOrderByIdCuentaAsc(cliente.getIdCliente()))
                 .orElse(null);
         BigDecimal promedio = cliente.getPromedioGasto() != null
                 ? cliente.getPromedioGasto()

@@ -18,11 +18,11 @@ Su valor actual es demostrativo y técnico: reúne controles de acceso, reglas e
 | Equipo técnico | Reglas aisladas, capas y pruebas | Modificar con evidencia de regresión |
 | Institución hipotética | Prototipo de decisión previa a una operación | Base para estudiar una integración real, no sustituto de ella |
 
-El administrador consulta reglas, pero no dispone aún de una pantalla o API para editarlas. La baja lógica conserva registros, pero no genera por sí sola una auditoría completa con autor, motivo y eventos inmutables.
+El administrador consulta reglas, crea reglas definidas, las prueba sin guardar y las activa o desactiva (con registro en `auditoria`), pero no dispone aún de una pantalla o API para editar pesos o condiciones de una regla existente. La baja lógica conserva registros, pero no genera por sí sola una auditoría completa con autor, motivo y eventos inmutables.
 
 ## 3. Capacidades comprobables
 
-- Ocho reglas con factores explicativos y ponderación por catálogo.
+- Ocho reglas Java y reglas definidas desde un formulario tipado, con factores explicativos y reparto porcentual de pesos.
 - Separación entre operaciones aprobadas, monitoreadas, retenidas y bloqueadas.
 - Descuento de débito solo al aprobar; nivel MEDIO mueve dinero y nivel ALTO lo retiene sin moverlo.
 - Aislamiento de operaciones del cliente y autorización explícita por ruta/método.
@@ -69,7 +69,7 @@ Estos análisis no están implementados como un producto de evaluación en el re
 - La recurrencia del beneficiario se basa en contactos guardados por cuenta (o nombre en el contrato antiguo); no exige una transferencia anterior aprobada.
 - La IP conocida puede provenir de transacciones previas no aprobadas.
 - No hay canal de notificaciones por correo, SMS o push.
-- Alertas, casos y auditoría están modelados, pero sin un flujo completo.
+- Alertas y casos están modelados, pero sin un flujo completo. La auditoría solo cubre la activación de reglas.
 - La sesión y los límites son locales por instancia; faltan componentes compartidos para alta disponibilidad.
 - Los listados/exportaciones pueden crecer en memoria y no todos están paginados.
 - H2 no acredita que el despliegue PostgreSQL, Docker o el proxy estén validados.
@@ -94,4 +94,4 @@ La creación demo está desactivada por defecto; las cuentas creadas anteriormen
 | Media | Paginación, exportación por streaming y migraciones versionadas | Operar con más datos y cambios controlados |
 | Exploratoria | Evaluador contextual LLM en modo de observación | Medir si aporta valor antes de influir en decisiones |
 
-La propuesta específica de reglas dinámicas y Qwen se documenta en [la propuesta de evolución](10_PROPUESTA_REGLAS_DINAMICAS_LLM.md) como diseño pendiente, no como una función implementada.
+La propuesta específica de reglas dinámicas y LLM se documenta en [la propuesta de evolución](10_PROPUESTA_REGLAS_DINAMICAS_LLM.md) como diseño pendiente, no como una función implementada.

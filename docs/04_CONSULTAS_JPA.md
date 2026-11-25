@@ -15,7 +15,7 @@ Existen 19 tablas y sus entidades, incluida `notificacion_usuario`. No todas tie
 | Contexto | `dispositivo`, `beneficiario` | Señales y referencias de operación |
 | Catálogos | `canal`, `tipo_transaccion`, `regla_fraude` | Canal, naturaleza y pesos de riesgo |
 | Operaciones | `transaccion`, `evaluacion_fraude`, `evaluacion_regla` | Persistencia y explicación del resultado |
-| Extensión del esquema | `caracteristica_transaccion`, `alerta_fraude`, `caso_fraude`, `historial_caso`, `auditoria` | Entidades conservadas; sin flujo completo de aplicación |
+| Extensión del esquema | `caracteristica_transaccion`, `alerta_fraude`, `caso_fraude`, `historial_caso`, `auditoria` | Entidades conservadas; sin flujo completo de aplicación. `auditoria` solo registra los cambios de estado de reglas |
 
 ## 2. Relaciones e identificadores
 
@@ -34,7 +34,7 @@ UsuarioSistema ↔ UsuarioRol ↔ Rol
 - `EvaluacionResponse.id` es una etiqueta `TR-` derivada del ID de evaluación.
 - `idInterno` es el identificador que usan las rutas PATCH de evaluación.
 
-La cuenta principal es la primera por ID ascendente. No existe una preferencia de cuenta configurable por pantalla; si esa primera cuenta no está activa, el caso de uso de creación no selecciona automáticamente otra.
+La cuenta principal es la primera cuenta ACTIVA por ID ascendente, obtenida con bloqueo de escritura. No existe una preferencia de cuenta configurable por pantalla. Si el cliente no tiene ninguna cuenta activa, la creación responde 400. Los números de cuenta se comparan sin espacios ni guiones (`replace` en JPQL), tanto al buscar la cuenta interna como al reutilizar un contacto del cliente.
 
 ## 3. Estrategias de consulta
 

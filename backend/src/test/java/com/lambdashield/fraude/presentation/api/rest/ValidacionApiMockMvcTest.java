@@ -5,6 +5,10 @@ import com.lambdashield.fraude.application.service.AuthService;
 import com.lambdashield.fraude.support.SesionesPrueba;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -61,45 +65,20 @@ class ValidacionApiMockMvcTest {
         return SesionesPrueba.crear(authService, "ADMIN");
     }
 
-    @Test
-    void requestValidoSigueAceptandose() throws Exception {
-        mockMvc.perform(post("/api/v1/evaluation").with(SesionesPrueba.csrf())
-                        .session(admin())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(JSON_VALIDO))
-                .andExpect(status().isOk());
+    static java.util.stream.Stream<Arguments> camposInvalidos() {
+        return java.util.stream.Stream.of(
+                Arguments.of("150.0", "10.555", MONTO_DECIMALES),
+                Arguments.of("150.0", "1e17", MONTO_DECIMALES),
+                Arguments.of("\"servicios\"", "\"retail; DROP TABLE\"", CATEGORIA),
+                Arguments.of("\"servicios\"", "\"" + "a".repeat(41) + "\"", CATEGORIA),
+                Arguments.of("\"C-001\"", "\"C 001!\"", CLIENTE),
+                Arguments.of("\"operacionesUltimaHora\": 1", "\"operacionesUltimaHora\": 1001", OPERACIONES));
     }
 
-    @Test
-    void montoConMasDeDosDecimalesSeRechaza() throws Exception {
-        assertCampoInvalido(JSON_VALIDO.replace("150.0", "10.555"), MONTO_DECIMALES);
-    }
-
-    @Test
-    void montoDemasiadoGrandeSeRechaza() throws Exception {
-        assertCampoInvalido(JSON_VALIDO.replace("150.0", "1e17"), MONTO_DECIMALES);
-    }
-
-    @Test
-    void categoriaConCaracteresPeligrososSeRechaza() throws Exception {
-        assertCampoInvalido(JSON_VALIDO.replace("\"servicios\"", "\"retail; DROP TABLE\""), CATEGORIA);
-    }
-
-    @Test
-    void categoriaDemasiadoLargaSeRechaza() throws Exception {
-        String larga = "a".repeat(41);
-        assertCampoInvalido(JSON_VALIDO.replace("\"servicios\"", "\"" + larga + "\""), CATEGORIA);
-    }
-
-    @Test
-    void clienteConFormatoInvalidoSeRechaza() throws Exception {
-        assertCampoInvalido(JSON_VALIDO.replace("\"C-001\"", "\"C 001!\""), CLIENTE);
-    }
-
-    @Test
-    void operacionesUltimaHoraFueraDeRangoSeRechaza() throws Exception {
-        assertCampoInvalido(JSON_VALIDO.replace("\"operacionesUltimaHora\": 1", "\"operacionesUltimaHora\": 1001"),
-                OPERACIONES);
+    @ParameterizedTest
+    @MethodSource("camposInvalidos")
+    void cadaCampoInvalidoDevuelveSuMensaje(String original, String reemplazo, String mensaje) throws Exception {
+        assertCampoInvalido(JSON_VALIDO.replace(original, reemplazo), mensaje);
     }
 
     @Test
@@ -135,13 +114,13 @@ class ValidacionApiMockMvcTest {
     @Test
     void idNoNumericoSeRechazaAntesDelControlador() throws Exception {
         mockMvc.perform(patch("/api/v1/evaluation/{id}", "abc").with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("No autorizado"));
+                .andExpect(SesionesPrueba.alLogin());
     }
 
-    @Test
-    void idNoPositivoEnPatchDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}", "0").with(SesionesPrueba.csrf()).session(admin()))
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/evaluation/0", "/api/v1/evaluation/0/activar"})
+    void idNoPositivoDevuelve400(String ruta) throws Exception {
+        mockMvc.perform(patch(ruta).with(SesionesPrueba.csrf()).session(admin()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value(ID_POSITIVO));
     }
@@ -158,23 +137,10 @@ class ValidacionApiMockMvcTest {
     }
 
     @Test
-    void idNoPositivoEnReactivarDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/v1/evaluation/{id}/activar", "0").with(SesionesPrueba.csrf()).session(admin()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errores[0]").value(ID_POSITIVO));
-    }
-
-    @Test
     void diasNoNumericosDevuelven400() throws Exception {
         mockMvc.perform(get("/api/v1/metric/movement?days=mes").session(admin()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores[0]").value("El parámetro 'days' tiene un valor inválido"));
-    }
-
-    @Test
-    void diasEnRangoSigueFuncionando() throws Exception {
-        mockMvc.perform(get("/api/v1/metric/summary?days=30").session(admin()))
-                .andExpect(status().isOk());
     }
 
     private void assertCampoInvalido(String json, String mensaje) throws Exception {

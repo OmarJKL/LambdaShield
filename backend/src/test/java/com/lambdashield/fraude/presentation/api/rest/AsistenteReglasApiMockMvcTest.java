@@ -38,14 +38,14 @@ class AsistenteReglasApiMockMvcTest {
         return session;
     }
     @Test void soloAdministradorPuedeRevisarYRequiereCsrf() throws Exception {
-        mvc.perform(get("/api/v1/rule/assistant/status")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/rule/assistant/status")).andExpect(SesionesPrueba.alLogin());
         for (String user : List.of("analista", "usuario")) {
-            mvc.perform(get("/api/v1/rule/assistant/status").session(sesion(user))).andExpect(status().isForbidden());
+            mvc.perform(get("/api/v1/rule/assistant/status").session(sesion(user))).andExpect(SesionesPrueba.alLogin());
             mvc.perform(post("/api/v1/rule/assistant/review").session(sesion(user)).with(SesionesPrueba.csrf())
-                    .contentType("application/json").content(BODY)).andExpect(status().isForbidden());
+                    .contentType("application/json").content(BODY)).andExpect(SesionesPrueba.alLogin());
         }
         mvc.perform(post("/api/v1/rule/assistant/review").session(sesion("admin"))
-                .contentType("application/json").content(BODY)).andExpect(status().isForbidden());
+                .contentType("application/json").content(BODY)).andExpect(SesionesPrueba.alLogin());
         verifyNoInteractions(proveedor);
     }
     @Test void devuelveDefinicionOriginalYRevisionSeparada() throws Exception {

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 public class ReglaResponseMapper {
 
     public ReglaResponse toResponse(ReglaCatalogo regla) {
-        return new ReglaResponse(regla.codigo(), regla.nombre(), regla.descripcion(), regla.pesoMaximo(), regla.activa());
+        return new ReglaResponse(regla.codigo(), regla.nombre(), regla.descripcion(), regla.pesoMaximo(), regla.activa(),
+                regla.participacion(), regla.personalizada());
     }
 }

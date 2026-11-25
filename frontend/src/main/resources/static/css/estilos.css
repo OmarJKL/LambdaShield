@@ -388,3 +388,12 @@ h1, h2, h3, h4, h5, h6, .navbar-brand {
 .notificaciones-vacio strong { color: var(--texto-principal); }
 .notificaciones-pie { padding: 12px 18px; color: var(--texto-secundario); text-align: center; font-size: .7rem; border-top: 1px solid var(--borde); }
 .notificaciones-mas { width: 100%; padding: 12px; border: 0; background: transparent; color: var(--utp-rojo); font-size: .8rem; font-weight: 600; }
+
+/* Catálogo compacto de reglas. */
+.tabla-reglas-contenedor { max-height: 660px; overflow: auto; }
+.tabla-reglas { min-width: 740px; }
+.tabla-reglas thead th { position: sticky; top: 0; z-index: 1; background: var(--fondo-tarjeta, #fff); white-space: nowrap; }
+.tabla-reglas th, .tabla-reglas td { padding: 16px 20px; }
+.tabla-reglas .regla-descripcion { min-width: 300px; max-width: 600px; overflow-wrap: anywhere; }
+#asistenteReglas > summary { cursor: pointer; }
+@media (max-width: 767px) { .tabla-reglas th, .tabla-reglas td { padding: 12px; } }

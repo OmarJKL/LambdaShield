@@ -13,7 +13,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 public final class SesionesPrueba {
     private SesionesPrueba() {}
     public static MockHttpSession crear(AuthService auth, String rol) {
-        String nombre = switch (rol) { case "ADMIN" -> "admin"; case "ANALISTA" -> "analista"; default -> "usuario"; };
+        return deUsuario(auth, switch (rol) { case "ADMIN" -> "admin"; case "ANALISTA" -> "analista"; default -> "usuario"; });
+    }
+    public static MockHttpSession deUsuario(AuthService auth, String nombre) {
         var usuario = auth.obtenerSesionActiva(nombre).orElseThrow();
         MockHttpSession sesion = new MockHttpSession();
         var contexto = SecurityContextHolder.createEmptyContext();
@@ -21,6 +23,14 @@ public final class SesionesPrueba {
         sesion.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, contexto);
         SessionValidationFilter.actualizarSesion(sesion, usuario);
         return sesion;
+    }
+    /** Rechazo de API: redirección al login sin cuerpo ni mensaje. */
+    public static org.springframework.test.web.servlet.ResultMatcher alLogin() {
+        return resultado -> {
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isFound().match(resultado);
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/login").match(resultado);
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string("").match(resultado);
+        };
     }
     public static RequestPostProcessor csrf() {
         return request -> {

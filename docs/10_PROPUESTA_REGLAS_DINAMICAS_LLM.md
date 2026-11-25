@@ -1,8 +1,8 @@
-# 10 — Propuesta: reglas dinámicas y evaluación contextual con Qwen
+# 10 — Propuesta: reglas dinámicas y evaluación contextual con LLM
 
 [Índice](README.md) · [Motor actual](03_REGLAS_ANTIFRAUDE.md) · [Seguridad actual](06_SEGURIDAD.md)
 
-**Estado: propuesta de motor dinámico y evaluación contextual, todavía pendientes.** Se implementó un asistente básico de revisión de formularios con OpenRouter, documentado en [12 — Asistente IA](12_ASISTENTE_REGLAS_IA.md). No publica reglas ni evalúa operaciones reales; esas capacidades de este diseño siguen pendientes. Thymeleaf se mantiene.
+**Estado: parcialmente implementado.** Desde el 25/11/2026 existen reglas definidas (RC) guardadas en `parametros_json`, reparto porcentual de pesos, activación auditada y pruebas sin guardar en el campo de desarrolladores ([03 §11 y §14](03_REGLAS_ANTIFRAUDE.md)). Siguen pendientes las versiones editables, la severidad graduada configurable y la evaluación contextual con LLM. Se implementó un asistente básico de revisión de formularios con OpenRouter, documentado en [12 — Asistente IA](12_ASISTENTE_REGLAS_IA.md). No publica reglas ni evalúa operaciones reales; esas capacidades de este diseño siguen pendientes. Thymeleaf se mantiene.
 
 ## 1. Qué significa «dinámico»
 
@@ -31,7 +31,7 @@ Mantener la identidad de `regla_fraude` y crear una entidad de versiones, por ej
 | Autor, publicador y motivo | Trazar el cambio administrativo |
 | Versión de esquema de parámetros | Interpretar correctamente su estructura |
 
-El campo actual `parametros_json` puede servir para un prototipo, pero hoy no basta con editarlo: el motor no interpreta esos parámetros. Para una solución mantenible, validar un esquema por tipo de regla y conservar versiones publicadas inmutables.
+`parametros_json` ya guarda la definición de las reglas RC, pero no los umbrales de las RF001–RF008: editarlo en una RF no cambia el motor. Para una solución mantenible, validar un esquema por tipo de regla y conservar versiones publicadas inmutables.
 
 No ejecutar Java, SQL, SpEL o expresiones arbitrarias recibidas desde una pantalla. Usar operadores y tipos autorizados: comparaciones, rangos, listas y curvas definidas por el backend.
 
@@ -92,9 +92,9 @@ Las comprobaciones obligatorias de permisos, saldo y límites de operación sigu
 
 ## 6. Proveedor OpenRouter
 
-El asistente implementado consume Chat Completions en `https://openrouter.ai/api/v1` con el modelo `qwen/qwen-plus` (Qwen Plus). La credencial corresponde a OpenRouter. [Modelo y API](https://openrouter.ai/qwen/qwen-plus).
+El asistente implementado consume Chat Completions en `https://openrouter.ai/api/v1` con el modelo `nvidia/nemotron-3.5-super-vl:free` (Nemotron 3.5 Super VL, configurable en `LLM_MODEL`). La credencial corresponde a OpenRouter. [Modelo y API](https://openrouter.ai/nvidia/nemotron-3.5-super-vl:free).
 
-Se solicita salida `json_object` y se mantiene validación estructural y semántica en Java. El JSON válido por sí solo no garantiza el contrato ni la corrección de las sugerencias. La configuración y límites del adaptador se describen en [Asistente IA](12_ASISTENTE_REGLAS_IA.md).
+Se solicita salida con esquema estricto (`json_schema`) y se mantiene validación estructural y semántica en Java. El JSON válido por sí solo no garantiza el contrato ni la corrección de las sugerencias. La configuración y límites del adaptador se describen en [Asistente IA](12_ASISTENTE_REGLAS_IA.md).
 
 Antes de enviar datos reales, revisar las políticas de tratamiento y retención de OpenRouter y de los proveedores elegidos en su enrutamiento. [Tratamiento de datos](https://openrouter.ai/docs/guides/privacy/data-collection).
 
@@ -159,7 +159,7 @@ Guardar una salida y su contexto permite auditar lo ocurrido; no garantiza que r
 | --- | --- | --- |
 | 1 | Parámetros tipados, curvas y versiones | Fronteras probadas, mismo resultado reproducible y snapshots conservados |
 | 2 | Administración Thymeleaf y publicación | Borradores, validación, permisos/CSRF, auditoría y rollback |
-| 3 | Adaptador Qwen con datos ficticios | Esquema validado, secretos protegidos, timeout y fallback probados |
+| 3 | Adaptador LLM con datos ficticios | Esquema validado, secretos protegidos, timeout y fallback probados |
 | 4 | Modo de observación | El LLM se registra/compara sin afectar saldos o decisiones del motor vigente |
 | 5 | Evaluación con etiquetas y costos | Medir falsos positivos, fraude omitido, estabilidad, latencia y gasto |
 | 6 | Influencia contextual acotada | Solo tras criterios explícitos de evaluación y política de combinación aprobada |

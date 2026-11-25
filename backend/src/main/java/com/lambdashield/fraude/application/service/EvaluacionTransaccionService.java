@@ -129,7 +129,7 @@ public class EvaluacionTransaccionService {
         // Se resuelven las referencias antes de evaluar: el tipo de beneficiario
         // derivado del historial real debe alimentar las reglas del motor.
         TransaccionReferenciasResolver.Referencias referencias =
-                referenciasResolver.resolver(cliente, request, userAgent);
+                referenciasResolver.resolver(cliente, request, userAgent, !soloDebito);
         if (soloDebito && referencias.tipoTransaccion().getNaturaleza()
                 != com.lambdashield.fraude.domain.enums.NaturalezaTransaccion.DEBITO) {
             throw new IllegalArgumentException("El portal del cliente solo permite operaciones de débito");
@@ -139,8 +139,7 @@ public class EvaluacionTransaccionService {
         TransaccionEvaluable transaccionEvaluable = new TransaccionEvaluable(
                 request.monto().doubleValue(), request.hora(), request.pais(), request.dispositivo(),
                 request.operacionesUltimaHora(), beneficiarioTipo, request.ip());
-        List<CatalogoReglasService.FactorConfigurado> configurados = catalogoReglas.aplicar(
-                deteccionFraudeService.evaluar(transaccionEvaluable, promedio));
+        List<CatalogoReglasService.FactorConfigurado> configurados = catalogoReglas.evaluar(transaccionEvaluable, promedio);
         List<FactorEvaluado> factoresEvaluados = configurados.stream()
                 .map(CatalogoReglasService.FactorConfigurado::factor).toList();
         int puntaje = deteccionFraudeService.calcularPuntajeTotal(factoresEvaluados);
@@ -162,6 +161,8 @@ public class EvaluacionTransaccionService {
                 .withMinute(0)
                 .withSecond(0)
                 .withNano(0);
+        // Una hora declarada posterior a la actual corresponde al día anterior: no se registran operaciones futuras.
+        if (fechaTransaccion.isAfter(fechaHora)) fechaTransaccion = fechaTransaccion.minusDays(1);
 
         Transaccion transaccion = Transaccion.builder()
                 .codigoTransaccion(UUID.randomUUID())
@@ -189,8 +190,9 @@ public class EvaluacionTransaccionService {
                 .nivelRiesgo(nivel)
                 .decision(nivel.decision())
                 .esPosibleFraude(nivel == NivelRiesgo.ALTO || nivel == NivelRiesgo.CRITICO)
-                .modeloUtilizado("Reglas RF001-RF008")
-                .versionModelo("1.0")
+                .modeloUtilizado("Catálogo de reglas activas")
+                // 2.0: los pesos se reparten en porcentaje entre las reglas activas.
+                .versionModelo("2.0")
                 .fechaEvaluacion(fechaHora)
                 .duracionMs(0)
                 .esActiva(true)
