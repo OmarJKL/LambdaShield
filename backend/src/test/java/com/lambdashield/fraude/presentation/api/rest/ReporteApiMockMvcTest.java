@@ -52,7 +52,9 @@ class ReporteApiMockMvcTest {
                 .andReturn().getResponse().getContentAsByteArray();
 
         // CSV empieza con su encabezado (ID), XLSX es un ZIP (PK) y PDF declara su versión.
-        assertThat(new String(cuerpo, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith(firma);
+        // El CSV va precedido del BOM UTF-8 para que Excel muestre bien las tildes.
+        String texto = new String(cuerpo, java.nio.charset.StandardCharsets.UTF_8).replaceFirst("^﻿", "");
+        assertThat("csv".equals(formato) ? texto : new String(cuerpo, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith(firma);
         if ("csv".equals(formato)) {
             assertThat(new String(cuerpo, java.nio.charset.StandardCharsets.UTF_8).lines().count()).isGreaterThan(1);
         }

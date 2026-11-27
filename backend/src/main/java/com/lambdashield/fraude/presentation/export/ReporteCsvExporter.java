@@ -7,29 +7,34 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 
-/** Serializa el historial de evaluaciones al formato CSV que descarga la interfaz. */
+/**
+ * CSV plano: encabezado + una fila por evaluación, separador coma, decimales con punto,
+ * fechas ISO y UTF-8 con BOM para que Excel respete las tildes.
+ */
 @Component
 public class ReporteCsvExporter {
+    private static final String BOM = "﻿";
 
     public byte[] exportar(List<EvaluacionResponse> filas) {
-        StringBuilder csv = new StringBuilder(
-                "ID,Fecha,Titular,Monto (S/),Categoria,Ubicacion,Hora,Puntaje,Nivel,Estado\n");
-        for (EvaluacionResponse evaluacion : filas) {
-            csv.append(campo(evaluacion.id())).append(',')
-                    .append(campo(evaluacion.fecha())).append(',')
-                    .append(campo(evaluacion.clienteNombre())).append(',')
-                    .append(String.format(Locale.US, "%.2f", evaluacion.monto())).append(',')
-                    .append(campo(evaluacion.categoria())).append(',')
-                    .append(campo(evaluacion.pais())).append(',')
-                    .append(String.format(Locale.ROOT, "%02d:00", evaluacion.hora())).append(',')
-                    .append(evaluacion.puntaje()).append(',')
-                    .append(campo(evaluacion.nivel().toUpperCase(Locale.ROOT))).append(',')
-                    .append(campo(evaluacion.estado())).append('\n');
+        StringBuilder csv = new StringBuilder(BOM)
+                .append(String.join(",", ReportePresentacion.COLUMNAS)).append("\r\n");
+        for (EvaluacionResponse e : filas) {
+            csv.append(campo(e.id())).append(',')
+                    .append(ReportePresentacion.fecha(e)).append(',')
+                    .append(ReportePresentacion.hora(e)).append(',')
+                    .append(campo(e.clienteCodigo())).append(',')
+                    .append(campo(e.clienteNombre())).append(',')
+                    .append(String.format(Locale.ROOT, "%.2f", e.monto())).append(',')
+                    .append(campo(e.categoria())).append(',')
+                    .append(campo(e.pais())).append(',')
+                    .append(e.puntaje()).append(',')
+                    .append(campo(ReportePresentacion.nivel(e.nivel()))).append(',')
+                    .append(campo(e.estado())).append("\r\n");
         }
         return csv.toString().getBytes(StandardCharsets.UTF_8);
     }
 
     private static String campo(String valor) {
-        return "\"" + (valor == null ? "" : valor.replace("\"", "\"\"")) + "\"";
+        return "\"" + ReportePresentacion.texto(valor).replace("\"", "\"\"") + "\"";
     }
 }

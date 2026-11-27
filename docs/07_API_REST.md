@@ -405,7 +405,7 @@ En POST `/api/v1/evaluation`, seleccionar una categoría cuyo tipo sea CREDITO d
 
 PDF y Excel incluyen identidad de Lambda Shield, fechas de los registros exportados, emisión en hora de Lima, cantidad, monto evaluado en PEN, puntaje promedio y número de evaluaciones de riesgo alto o crítico. El monto evaluado suma los importes de las evaluaciones incluidas; no representa egresos aprobados ni pérdidas por fraude.
 
-El Excel conserva una hoja con datos numéricos y fechas tipadas, indicadores calculados, filtros, paneles inmovilizados y preparación de impresión horizontal. Los textos se almacenan como texto, incluso si comienzan con `=`. El PDF repite el encabezado del detalle y numera las páginas. Ambos muestran un mensaje legible al no haber registros. El CSV conserva el contrato de datos existente.
+Los tres formatos comparten la misma tabla plana, una fila por evaluación y sin totales ni celdas combinadas: `ID, Fecha, Hora, Codigo cliente, Cliente, Monto PEN, Categoria, Ubicacion, Puntaje, Nivel, Estado`. Las fechas van en ISO (`yyyy-MM-dd`), los montos con punto decimal y el nivel como código (`BAJO`, `MEDIO`, `ALTO`, `CRITICO`). El CSV es UTF-8 con BOM. El Excel empieza en A1, guarda fechas, horas y montos como valores reales, y trae autofiltro y la fila de encabezado inmovilizada, listo para tablas dinámicas. Los textos se guardan como texto aunque empiecen con `=`. El PDF muestra la misma tabla, repite el encabezado en cada página y las numera.
 
 ## Reglas definidas y pruebas sin guardar
 

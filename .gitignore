@@ -7,6 +7,9 @@ target/
 ### Credenciales ###
 .env
 
+### Exportacion local de datos ###
+/datos-locales.sql
+
 ### STS ###
 .apt_generated
 .classpath

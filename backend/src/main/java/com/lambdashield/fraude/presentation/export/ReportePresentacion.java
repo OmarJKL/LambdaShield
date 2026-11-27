@@ -1,36 +1,34 @@
 package com.lambdashield.fraude.presentation.export;
 
 import com.lambdashield.fraude.presentation.dto.response.EvaluacionResponse;
-import java.awt.Color;
-import java.math.BigDecimal;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Locale;
 
+/**
+ * Contrato de columnas compartido por CSV, Excel y PDF: una fila por evaluación,
+ * sin totales ni adornos, con valores normalizados para tablas dinámicas, Power BI o pandas.
+ */
 final class ReportePresentacion {
-    static final Color ROJO = new Color(176, 22, 49);
-    static final Color TINTA = new Color(31, 41, 55);
-    static final Color GRIS = new Color(100, 116, 139);
-    static final Color FONDO = new Color(245, 247, 250);
-    static final String[] COLUMNAS = {"ID", "Fecha", "Titular", "Monto (PEN)", "Categoría", "Ubicación", "Hora", "Puntaje", "Nivel", "Estado"};
-    static final DateTimeFormatter FECHA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    static final String[] COLUMNAS = {"ID", "Fecha", "Hora", "Codigo cliente", "Cliente", "Monto PEN",
+            "Categoria", "Ubicacion", "Puntaje", "Nivel", "Estado"};
+    static final DateTimeFormatter FECHA_ISO = DateTimeFormatter.ISO_LOCAL_DATE;
     private ReportePresentacion() {}
-    static String emision() {
-        return ZonedDateTime.now(ZoneId.of("America/Lima")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) + " (Lima)";
+
+    /** Fecha ISO (yyyy-MM-dd): ordenable y reconocida por cualquier herramienta. */
+    static String fecha(EvaluacionResponse e) {
+        return e.fechaHora() != null ? FECHA_ISO.format(e.fechaHora()) : texto(e.fecha());
     }
-    static String periodo(List<EvaluacionResponse> filas) {
-        var fechas = filas.stream().map(EvaluacionResponse::fechaHora).filter(java.util.Objects::nonNull).sorted().toList();
-        return fechas.isEmpty() ? "Sin fechas de evaluación disponibles" : "Fechas de evaluación: " + FECHA.format(fechas.getFirst()) + " al " + FECHA.format(fechas.getLast());
+
+    static String hora(EvaluacionResponse e) {
+        return String.format(Locale.ROOT, "%02d:00", e.hora());
     }
-    static String moneda(BigDecimal valor) { return "S/ " + String.format(Locale.US, "%,.2f", valor); }
-    static String nivel(String valor) { return "critico".equals(valor) ? "CRÍTICO" : valor.toUpperCase(Locale.ROOT); }
-    static Color color(String nivel) {
-        return switch (nivel) { case "bajo" -> new Color(21, 112, 81); case "medio" -> new Color(151, 100, 10); case "alto" -> new Color(180, 83, 9); default -> ROJO; };
+
+    /** Nivel como código estable (BAJO, MEDIO, ALTO, CRITICO) para agrupar sin variantes. */
+    static String nivel(String valor) {
+        return valor == null ? "" : valor.toUpperCase(Locale.ROOT);
     }
-    static long cantidad(List<EvaluacionResponse> filas, String nivel) { return filas.stream().filter(f -> nivel.equals(f.nivel())).count(); }
-    static String distribucion(List<EvaluacionResponse> filas) {
-        return "Bajo: " + cantidad(filas, "bajo") + "    Medio: " + cantidad(filas, "medio") + "    Alto: " + cantidad(filas, "alto") + "    Crítico: " + cantidad(filas, "critico");
+
+    static String texto(String valor) {
+        return valor == null ? "" : valor;
     }
 }
